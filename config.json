@@ -9,9 +9,14 @@
   "max_iterations": 32,
   "identity_file": "prompts/internal_employee.md",
   "web": {
-    "enabled": true,
+    "enabled": false,
     "host": "127.0.0.1",
     "port": 8765
+  },
+  "workspace_web": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8767
   },
   "customer_portal": {
     "enabled": true,
@@ -41,6 +46,13 @@
       "command": "{python}",
       "args": ["-m", "mcp_servers.foreign_trade_inquiry_server"],
       "description": "Foreign trade inquiry and quotation business server",
+      "enabled": false
+    },
+    "inquiry_workflow_tools": {
+      "command": "{python}",
+      "args": ["-m", "mcp_servers.inquiry_workflow_tools_server"],
+      "env_prefixes": ["DUE_DILIGENCE_", "TAVILY_", "DEMO_", "TRADE_OPS_MYSQL_", "NANOCLAW_MYSQL_", "BUSINESS_DATABASE_"],
+      "description": "Auditable due diligence, catalog and deterministic quote MCP tools",
       "enabled": true
     },
     "trade_rag": {

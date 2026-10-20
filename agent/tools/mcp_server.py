@@ -9,6 +9,7 @@ MCP (Model Context Protocol) 工具模块
 """
 
 import asyncio
+import os
 import sys
 from typing import Any
 
@@ -139,10 +140,16 @@ class MCPClientManager:
         command = server_config["command"]
         if command == "{python}":
             command = sys.executable
+        server_env = server_config.get("env")
+        env_prefixes = tuple(server_config.get("env_prefixes") or ())
+        if env_prefixes:
+            inherited = {key: value for key, value in os.environ.items()
+                         if key.startswith(env_prefixes)}
+            server_env = {**inherited, **(server_env or {})}
         server_params = StdioServerParameters(
             command=command,
             args=server_config.get("args", []),
-            env=server_config.get("env", None),
+            env=server_env,
         )
 
         # 2. stdio_client 上下文管理器，手动 __aenter__

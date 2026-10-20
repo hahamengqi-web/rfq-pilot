@@ -35,7 +35,7 @@ def test_import_v3_counts_match_actual_splitter_and_duplicate(tmp_path: Path):
     assert entry["source_hash"]
     assert entry["parse_status"] == "ready" and entry["chunk_status"] == "ready"
     assert (entry["parent_count"], entry["child_count"]) == (len(parents), len(children))
-    assert entry["index_status"] == "ready"
+    assert entry["index_status"] == "indexed"
     listing = client.get("/api/knowledge/documents").json()
     assert listing["total"] == 1
     assert listing["summary"]["parent_count"] == len(parents)

@@ -37,6 +37,7 @@ class AgentLoop:
         memory_lifecycle=None,
         memory_request_factory=None,
         memory_command_router=None,
+        max_tool_calls_per_turn: int | None = None,
     ):
         """初始化 AgentLoop
 
@@ -56,6 +57,7 @@ class AgentLoop:
         self.session_key = session_key
         self.model = model
         self.max_iterations = max_iterations
+        self.max_tool_calls_per_turn = max_tool_calls_per_turn
         self.workflow_service = workflow_service
         self.memory_lifecycle = memory_lifecycle
         self.memory_request_factory = memory_request_factory
@@ -71,6 +73,7 @@ class AgentLoop:
     def set_request_context(self, context: dict | None) -> None:
         """Accept trusted per-request metadata supplied by the server channel."""
         self._request_context = dict(context or {})
+
 
     async def run(self, user_message: str) -> str:
         request_id = str(self._request_context.get("request_id") or uuid.uuid4())
@@ -129,15 +132,17 @@ class AgentLoop:
         self.session_manager.save_message(self.session_key, user_msg)
 
         # 2. 循环处理
+        tool_calls_used = 0
         for iteration in range(self.max_iterations):
             if hasattr(self, 'consolidator') and self.consolidator:
                 messages = await self.consolidator.maybe_consolidate(messages)
             # a. 调用 LLM（打印思考提示）
             print(f"  💭 思考中... (第 {iteration + 1} 轮)", end="", flush=True)    
+            available_tools = (self.tools.get_definitions()
+                               if self.max_tool_calls_per_turn is None
+                               or tool_calls_used < self.max_tool_calls_per_turn else [])
             response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model
+                messages=messages, tools=available_tools, model=self.model,
             )
             print(" ✓")  # 思考完成
 
@@ -168,6 +173,16 @@ class AgentLoop:
 
                 # 遍历每个 tool_call
                 for tc in response.tool_calls:
+                    if (self.max_tool_calls_per_turn is not None
+                            and tool_calls_used >= self.max_tool_calls_per_turn):
+                        tool_msg = {
+                            "role": "tool", "tool_call_id": tc.id,
+                            "content": "本轮检索已完成。请根据已有证据回答；证据不足时明确说明无法确认。",
+                        }
+                        messages.append(tool_msg)
+                        self.session_manager.save_message(self.session_key, tool_msg)
+                        continue
+                    tool_calls_used += 1
                     # 获取参数 JSON 字符串
                     args_json = json.dumps(tc.arguments, ensure_ascii=False)
 
@@ -224,6 +239,10 @@ class AgentLoop:
                                     f"{request_id}:tool:{tc.id}",
                                 )
                             )
+                        if (self.session_key.startswith("customer_portal:")
+                                and tc.name.rsplit("__", 1)[-1] == "search_public_knowledge"):
+                            self._save_to_history(messages)
+                            return self._customer_knowledge_reply(result)
 
                 # continue 回到循环顶部
                 continue
@@ -247,7 +266,42 @@ class AgentLoop:
 
     def _finalize_response(self, content: str) -> str:
         """Apply channel-specific response policy before persistence and return."""
+        if self.session_key.startswith("customer_portal:"):
+            normalized = content.lower()
+            if any(marker in normalized for marker in (
+                "<tool_call", "<toolcall", "<arg_key>", "<arg_value>",
+            )):
+                return {
+                    "zh": "目前无法核实这条产品信息，请稍后重试或联系人工客服。",
+                    "en": "I cannot verify this product information right now. Please try again later or contact support.",
+                    "de": "Diese Produktinformation kann ich derzeit nicht prüfen. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Kundendienst.",
+                }.get(str(self._request_context.get("language") or "zh"),
+                      "目前无法核实这条产品信息，请稍后重试或联系人工客服。")
         return content
+
+    def _customer_knowledge_reply(self, raw_result: str) -> str:
+        """Return the evidence-checked RAG answer without a second tool-using model pass."""
+        try:
+            result = json.loads(raw_result)
+        except (TypeError, ValueError):
+            result = {}
+        if (result.get("status") == "ANSWERED"
+                and isinstance(result.get("answer"), str)
+                and result["answer"].strip()
+                and result.get("citations")):
+            return self._finalize_response(result["answer"].strip())
+        language = str(self._request_context.get("language") or "zh")
+        if result.get("status") == "TEMPORARILY_UNAVAILABLE":
+            return self._finalize_response({
+                "zh": "知识库暂时不可用，请稍后重试。",
+                "en": "The knowledge base is temporarily unavailable. Please try again later.",
+                "de": "Die Wissensdatenbank ist vorübergehend nicht verfügbar. Bitte versuchen Sie es später erneut.",
+            }.get(language, "知识库暂时不可用，请稍后重试。"))
+        return self._finalize_response({
+            "zh": "目前的公开产品资料不足以确认这一点，请联系人工客服核实。",
+            "en": "The available public product information does not confirm this. Please contact a human support representative.",
+            "de": "Die verfügbaren öffentlichen Produktinformationen bestätigen dies nicht. Bitte wenden Sie sich an den Kundendienst.",
+        }.get(language, "目前的公开产品资料不足以确认这一点，请联系人工客服核实。"))
 
     def _tool_calls_allowed(self, response: LLMResponse) -> bool:
         del response

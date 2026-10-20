@@ -196,10 +196,11 @@ def test_rebuild_contains_only_current_authoritative_rows_and_preserves_old_on_b
 def test_m6_release_switches_are_off_and_dependencies_fail_closed(tmp_path, monkeypatch):
     for name in (
         "NANOCLAW_MEMORY_GOVERNANCE_ENABLED", "NANOCLAW_MEMORY_BACKUP_ENABLED",
+        "NANOCLAW_MEMORY_HYBRID_RETRIEVAL_ENABLED",
         "NANOCLAW_CUSTOMER_LONG_TERM_MEMORY_ENABLED",
         "NANOCLAW_CUSTOMER_CONVERSATION_MEMORY_ENABLED", "NANOCLAW_CUSTOMER_AUTH_ENABLED",
     ):
-        monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(name, "false")
     config = load_config(str(tmp_path / "missing.json"))
     assert config.memory_governance_enabled is False
     assert config.memory_backup_enabled is False

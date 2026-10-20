@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -23,6 +24,9 @@ class PdfIngestionCoordinator:
         self._stopping = False
         self._reconcile_lock = threading.Lock()
         self._reconciled = False
+        self._auto_accept_safe_review = os.environ.get(
+            "RAG_PDF_AUTO_ACCEPT_SAFE_REVIEW", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
 
     def reconcile_indexes_once(self) -> None:
         """Run the shared startup reconciliation once for both local Web listeners."""
@@ -50,6 +54,9 @@ class PdfIngestionCoordinator:
             self._thread.start()
         for document_id in self.repository.list_pdf_processing_candidates():
             self.enqueue(document_id)
+        if self._auto_accept_safe_review:
+            for document_id in self.repository.list_pdf_auto_review_candidates():
+                self.enqueue(document_id)
 
     def enqueue(self, document_id: str) -> bool:
         self.start()
@@ -79,13 +86,25 @@ class PdfIngestionCoordinator:
     def _process(self, document_id: str) -> None:
         try:
             current = self.repository.get_document(document_id)
-            if current.get("status") in {"revoked", "revoke_pending", "review_required"}:
+            if current.get("status") in {"revoked", "revoke_pending"}:
                 return
+            if current.get("status") == "review_required":
+                if not self._auto_accept_safe_review:
+                    return
+                current = self.repository.approve_review(
+                    document_id, approval_mode="automatic",
+                )
             if (current.get("parse_status") != "ready"
                     or current.get("chunk_status") != "ready"):
                 current = self.repository.process_staged_pdf(document_id)
-            if current.get("status") in {"revoked", "revoke_pending", "review_required"}:
+            if current.get("status") in {"revoked", "revoke_pending"}:
                 return
+            if current.get("status") == "review_required":
+                if not self._auto_accept_safe_review:
+                    return
+                current = self.repository.approve_review(
+                    document_id, approval_mode="automatic",
+                )
             if (current.get("parse_status") == "ready"
                     and current.get("chunk_status") == "ready"
                     and current.get("ingestion_route") == "index"

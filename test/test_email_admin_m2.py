@@ -42,11 +42,11 @@ def test_workspace_exposes_email_navigation_tabs_and_account_form(tmp_path: Path
     assert 'id="emailAuthCode" type="password"' in page.text
     assert 'id="emailAuthCode" type="password" autocomplete="off"' in page.text
     assert 'id="emailAdminToken"' not in page.text
-    assert "Agent 自动审核 RFQ 字段" in page.text
+    assert "RFQ 字段由 Agent 自动审核" in page.text
     assert 'data-view="ops"' not in page.text
     assert 'id="opsView"' not in page.text
-    assert "/static/app.css?v=20260827-approval-actions-1" in page.text
-    assert "/static/app.js?v=20260827-approval-actions-2" in page.text
+    assert "/static/app.css?v=20261017-email-workflow" in page.text
+    assert "/static/app.js?v=20261017-email-workflow-4" in page.text
 
 
 def test_email_ui_uses_m0_routes_and_never_persists_email_secrets(tmp_path: Path):

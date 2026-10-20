@@ -40,7 +40,10 @@ class MySQLEmailAccountRepository:
             cursor.execute("""SELECT table_name FROM information_schema.tables
               WHERE table_schema=DATABASE() AND table_name IN
               ('ops_email_account','ops_email_account_audit')""")
-            actual = {row["table_name"] for row in cursor.fetchall()}
+            actual = {
+                next((value for key, value in row.items() if str(key).casefold() == "table_name"), "")
+                for row in cursor.fetchall()
+            }
         missing = {"ops_email_account", "ops_email_account_audit"} - actual
         if missing:
             raise EmailAccountRepositoryError(

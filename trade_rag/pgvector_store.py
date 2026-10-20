@@ -114,13 +114,15 @@ class PgvectorStore:
                 cursor.executemany(statement, params)
         return len(rows)
 
-    def search(self, vector, actor: Actor, limit: int = 30) -> list[SearchResult]:
+    def search(self, vector, actor: Actor, limit: int = 30,
+               allowed_document_ids=()) -> list[SearchResult]:
         values = list(vector)
         if len(values) != self.config.dimensions:
             raise ValueError("embedding_dimension_mismatch")
         if limit <= 0 or limit > 1000:
             raise ValueError("limit must be between 1 and 1000")
         customer_filter = " AND classification = 'public'" if "customer" in actor.roles else ""
+        document_filter = " AND document_id = ANY(%s::text[])" if allowed_document_ids else ""
         statement = """
             SELECT child_id, document_id, document_version, parent_id, child_text,
                    child_location, child_content_hash, child_metadata, source_uri,
@@ -134,12 +136,16 @@ class PgvectorStore:
                AND document_status IN ('approved', 'published')
                AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
                {customer_filter}
+               {document_filter}
              ORDER BY score DESC, child_id ASC
              LIMIT %s
-        """.format(customer_filter=customer_filter)
+        """.format(customer_filter=customer_filter, document_filter=document_filter)
+        parameters = [values, actor.business_unit_id, sorted(actor.roles)]
+        if allowed_document_ids:
+            parameters.append(sorted(set(allowed_document_ids)))
+        parameters.append(limit)
         with self._connect() as connection:
-            rows = connection.execute(statement, (values, actor.business_unit_id,
-                                                    sorted(actor.roles), limit)).fetchall()
+            rows = connection.execute(statement, parameters).fetchall()
         results = []
         for row in rows:
             child = ChildChunk(row[0], row[3], row[1], row[4], row[5], row[6], row[7] or {})

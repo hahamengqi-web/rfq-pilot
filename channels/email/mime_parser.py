@@ -127,4 +127,6 @@ def parse_email(raw: bytes, *, account_id: str, provider: str, folder: str,
         sent_at=_date(message.get("date")), received_at=received_at,
         text_body=body, html_body_hash=hashlib.sha256(html_source.encode()).hexdigest() if html_source else "",
         attachments=tuple(attachments), raw_sha256=hashlib.sha256(raw).hexdigest(),
+        references=tuple(re.findall(r"<[^<>]+>", _header(message.get("References"))))[:30],
+        raw_bytes=raw,
     )

@@ -14,3 +14,10 @@ def isolate_default_rag_backends(monkeypatch):
         monkeypatch.setenv("RAG_VECTOR_BACKEND", "memory")
     if os.environ.get("NANOCLAW_TEST_ELASTICSEARCH") != "1":
         monkeypatch.setenv("RAG_KEYWORD_BACKEND", "memory")
+
+
+@pytest.fixture(autouse=True)
+def isolate_legacy_subsystems(monkeypatch, request):
+    """Historical subsystem tests are standalone; inquiry tests explicitly enable the new workflow."""
+    if "inquiry" not in request.node.nodeid:
+        monkeypatch.setenv("INQUIRY_WORKFLOW_ENABLED", "false")

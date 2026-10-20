@@ -184,6 +184,9 @@ class EmailQuoteWorkflowService:
         return {"email_id": email_id, "work_status": "quote_blocked", "error_code": code}
 
     def materialize_confirmed(self, *, email_id: int, review_id: str, review_hash: str) -> dict:
+        from agent.inquiry.config import InquirySettings
+        if InquirySettings.from_env().enabled:
+            raise EmailQuoteWorkflowError("inquiry_workflow_required", 409)
         existing = self.connection.execute(
             "SELECT * FROM ops_email_quote_workflow WHERE email_id=?", (email_id,)
         ).fetchone()
@@ -243,6 +246,9 @@ class EmailQuoteWorkflowService:
         return self._work_item(dict(row))
 
     def decide(self, approval_key: int, *, action: str, reviewer: str, comment: str = "") -> dict:
+        from agent.inquiry.config import InquirySettings
+        if InquirySettings.from_env().enabled:
+            raise EmailQuoteWorkflowError("inquiry_workflow_required", 409)
         if action not in {"approve", "reject"}:
             raise EmailQuoteWorkflowError("email_approval_invalid_action")
         if not reviewer.strip():
@@ -282,6 +288,9 @@ class EmailQuoteWorkflowService:
 
     def regenerate_approval(self, quote_id: int, *, reviewer: str) -> dict:
         """Create a fresh approval bound to the current immutable quote version."""
+        from agent.inquiry.config import InquirySettings
+        if InquirySettings.from_env().enabled:
+            raise EmailQuoteWorkflowError("inquiry_workflow_required", 409)
         if not reviewer.strip():
             raise EmailQuoteWorkflowError("email_approver_not_configured", 503)
         quote = self.connection.execute(
@@ -361,6 +370,9 @@ class EmailQuoteWorkflowService:
         }
 
     def sync_confirmed(self) -> None:
+        from agent.inquiry.config import InquirySettings
+        if InquirySettings.from_env().enabled:
+            return
         rows = self.connection.execute("""SELECT email_id,confirmed_review_id,confirmed_review_hash
           FROM ops_inbound_email WHERE status='confirmed' AND confirmed_review_id IS NOT NULL""").fetchall()
         for row in rows:

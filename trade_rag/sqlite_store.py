@@ -411,12 +411,18 @@ class SqliteVectorStore:
                 )
         return len(rows)
 
-    def _eligible(self, actor: Actor) -> set[str]:
+    def _eligible(self, actor: Actor, allowed_document_ids=()) -> set[str]:
         visibility, params = self.db.visibility(actor)
+        document_filter = ""
+        allowed = sorted(set(allowed_document_ids))
+        if allowed:
+            document_filter = (
+                " AND c.document_id IN (" + ",".join("?" for _ in allowed) + ")"
+            )
         return {row[0] for row in self.db.connection.execute(
             f"SELECT c.child_id FROM rag_child c JOIN rag_document d "
             f"ON d.document_id=c.document_id AND d.document_version=c.document_version "
-            f"WHERE {visibility}", params,
+            f"WHERE {visibility}{document_filter}", [*params, *allowed],
         )}
 
     def _result(self, child_id: str, actor: Actor, score: float) -> SearchResult | None:
@@ -439,7 +445,7 @@ class SqliteVectorStore:
         return SearchResult(child, score, _document(row, child.text))
 
     def search(self, vector: Iterable[float], actor: Actor,
-               limit: int = 30) -> list[SearchResult]:
+               limit: int = 30, allowed_document_ids=()) -> list[SearchResult]:
         values = list(vector)
         if len(values) != self.config.dimensions:
             raise ValueError("embedding_dimension_mismatch")
@@ -448,7 +454,7 @@ class SqliteVectorStore:
         if limit <= 0 or limit > 1000:
             raise ValueError("limit must be between 1 and 1000")
         with self.db._lock:
-            eligible = self._eligible(actor)
+            eligible = self._eligible(actor, allowed_document_ids)
             if not eligible:
                 return []
             total = int(self.db.connection.execute(
@@ -538,13 +544,19 @@ class SqliteKeywordStore:
                 )
         return len(rows)
 
-    def search(self, query: str, actor: Actor, limit: int = 30) -> list[SearchResult]:
+    def search(self, query: str, actor: Actor, limit: int = 30,
+               allowed_document_ids=()) -> list[SearchResult]:
         expression = _fts_query(query)
         if not expression:
             return []
         if limit <= 0 or limit > 1000:
             raise ValueError("limit must be between 1 and 1000")
         visibility, params = self.db.visibility(actor)
+        allowed = sorted(set(allowed_document_ids))
+        document_filter = (
+            " AND c.document_id IN (" + ",".join("?" for _ in allowed) + ")"
+            if allowed else ""
+        )
         with self.db._lock:
             rows = self.db.connection.execute(
                 f"""SELECT c.child_id,c.parent_id,c.child_text,c.child_location,
@@ -554,9 +566,9 @@ class SqliteKeywordStore:
                       JOIN rag_child c ON c.child_id=rag_child_fts.child_id
                       JOIN rag_document d ON d.document_id=c.document_id
                        AND d.document_version=c.document_version
-                     WHERE rag_child_fts MATCH ? AND {visibility}
+                     WHERE rag_child_fts MATCH ? AND {visibility}{document_filter}
                      ORDER BY rank ASC,c.child_id ASC LIMIT ?""",
-                [expression, *params, limit],
+                [expression, *params, *allowed, limit],
             ).fetchall()
         strengths = [abs(float(row["rank"])) for row in rows]
         strongest = max(strengths, default=1.0) or 1.0

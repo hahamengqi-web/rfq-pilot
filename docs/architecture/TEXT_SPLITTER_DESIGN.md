@@ -1,5 +1,7 @@
 # RAG 文本切分设计
 
+> 当前产品知识入库使用 `trade_rag.token_chunking.TokenSplitter` 和随项目保存的 Qwen3-Embedding-8B tokenizer：父块 800 token、相邻正文父块重叠约 80 token（10%），子块 200 token、重叠 20 token。Markdown 表格先按表头和数据行拆分，PDF 表格先转换为 Markdown。下文的 `RecursiveSplitter` 字符级说明保留为历史设计和兼容接口，不代表当前产品知识库的切块单位。
+
 ## 1. 目标
 
 文本切分器负责把原始文档转换成适合索引和检索的文本块，同时尽量保留自然语言结构、Markdown 代码块和相邻块之间的上下文连续性。

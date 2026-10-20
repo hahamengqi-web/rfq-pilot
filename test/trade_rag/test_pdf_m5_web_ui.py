@@ -131,7 +131,8 @@ def test_needs_ocr_and_review_pdf_states_are_visible_but_preview_is_blocked(tmp_
     assert listing["summary"]["needs_ocr_count"] == 1
 
 
-def test_complex_layout_review_approval_chunks_indexes_and_previews_pdf(tmp_path):
+def test_complex_layout_review_approval_chunks_indexes_and_previews_pdf(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAG_PDF_AUTO_ACCEPT_SAFE_REVIEW", "false")
     _, client = _client(tmp_path)
     imported = client.post(
         "/api/knowledge/import", content=build_fixture(_cases()["two_column"]),

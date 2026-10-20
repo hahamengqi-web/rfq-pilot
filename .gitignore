@@ -14,6 +14,9 @@ wheels/
 # Local editor and disposable test/runtime artifacts
 .idea/
 .tmp/
+.runtime/
+runtime/
+.run-main*.log
 
 # PaddleX runtime cache. Keep only the three OCR models required for offline
 # delivery; ignore server models, download locks, temporary files and caches.
@@ -35,29 +38,27 @@ wheels/
 !deploy/docker/.env.example
 deploy/docker/.env
 data/*.dpapi.json
+agent/business/data/*.db
+agent/business/data/*.db-shm
+agent/business/data/*.db-wal
+agent/business/data/*.sqlite-shm
+agent/business/data/*.sqlite-wal
 botpy.log*
 workspace/sessions/*.jsonl
+workspace/sessions/*.json
 workspace/customer_sessions/*.jsonl
 workspace/peer_sessions/*.jsonl
 workspace/runtime/
 workspace/internal_agent/
 workspace/browser-acceptance/
 workspace/browser-check.*.log
+workspace/analytics/
+workspace/customer_auth/
+workspace/customer_data/
+workspace/customer_memory/
+workspace/import_ready/
+workspace/output/
+workspace/workflows/
 workspace/memory/HISTORY.md
+workspace/memory/MEMORY.md
 workspace/knowledge_base/
-
-# Source repository: exclude local models and all live business/session data
-/.paddlex/
-/workspace/
-/agent/business/data/
-/data/
-*.db
-*.db-wal
-*.db-shm
-*.db-journal
-*.sqlite
-*.sqlite3
-*.sqlite-wal
-*.sqlite-shm
-*.sqlite3-wal
-*.sqlite3-shm

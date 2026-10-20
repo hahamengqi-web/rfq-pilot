@@ -6,7 +6,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.136.1-009688?logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-1.27.0-5A45FF)
 
-NanoClaw 把内部工作台、独立客户门户、CLI、QQ 和飞书收到的消息交给不同权限的 Agent，再通过受控工具完成企业知识检索、产品查询、询盘抽取、报价审批、邮件协作与记忆管理。
+NanoClaw 包含面向客户的产品与售后智能客服，以及内部持久化询盘工作流。客户客服从独立门户运行，只能检索公开知识；询盘背调、人工审核与报价仍在内部工作台处理。新流程入口是 `/inquiries`，部署与操作说明见 [询盘工作流运行说明](docs/architecture/INQUIRY_WORKFLOW.md)。
 
 它不只是一个聊天页面。项目重点解决的是：**怎样让 AI 在真实业务中找到正确资料、调用正确工具、隔离客户与内部数据，并把不确定的对外操作留给人工确认。**
 
@@ -26,7 +26,7 @@ NanoClaw 把内部工作台、独立客户门户、CLI、QQ 和飞书收到的�
 
 ### 多入口 Agent 工作台
 
-- 内部工作台、营销首页和独立客户门户
+- 内部工作台、询盘工作台和营销首页
 - CLI、WebSocket v2、QQ、飞书等消息入口
 - Gateway 统一路由、会话隔离、请求关联与并发控制
 - MCP 工具发现与加载，以及项目内 Skills 扩展
@@ -43,22 +43,25 @@ NanoClaw 把内部工作台、独立客户门户、CLI、QQ 和飞书收到的�
 
 - 文本与 PDF 持久导入、去重、撤回和重建
 - PDF 页级解析、复杂版面人工复核和 OCR 失败关闭
-- Parent/Child 切块、查询改写、语义与关键词混合召回
+- Qwen tokenizer 父子切块（800/200 token，正文父块 10% 重叠）、Markdown 表格切块、查询改写、语义与关键词混合召回
+- Milvus/Elasticsearch 配置下父块保存在独立 Elasticsearch 索引；客服查询只读取已入库索引，不重复向量化
+- 文本上传在切块后写入三路索引；修改文本公开权限时重新索引，失败记录为可重试状态
 - RRF 融合、可选重排、Parent 回取与页码引用
 - `internal` / `public` 分类和客户侧公开检索门禁
 - 本地内存后端默认启用，pgvector、Milvus 和 Elasticsearch 显式可选
 
-### 双 Agent 与记忆隔离
+### 背调、报价与人工暂停恢复
 
-- 内部外贸询盘与报价 Agent 和客户产品咨询 Agent 分别组装身份、工具、会话与记忆
-- 内部员工 Agent 使用独立的 LangGraph runtime 编排模型与业务工具，并通过薄适配层接入 NanoClaw
-- LangGraph Redis 只保存未完成请求的恢复断点；SQLite 仅用于测试，会话、RFQ、报价、审批和邮件仍由原有存储负责
-- 客户 Agent 只拥有产品搜索、产品详情和产品比较三个受控只读工具
-- 工作区可按最小化问题读取客户记忆，客户代码不能反向读取工作区记忆
-- SQLite 短期工作记忆、MySQL 结构化长期记忆、Milvus 长期语义索引物理分层
-- 长期记忆的同意、确认、撤回、删除、索引补偿与访问审计相互分离
-- 具体数据流和初始化方式见 [`docs/architecture/三层记忆架构.md`](docs/architecture/三层记忆架构.md)
-- 内部 Agent 的框架边界和状态位置见 [`docs/architecture/INTERNAL_EMPLOYEE_AGENT_ARCHITECTURE.md`](docs/architecture/INTERNAL_EMPLOYEE_AGENT_ARCHITECTURE.md)
+- 背调 Agent 使用 Plan-and-Execute：先生成受限调查计划，再执行官网受控爬取、地图、企业级海关和新闻查询，检查缺口后生成报告；人工确认后才准备报价
+- 询盘回复 Agent 在背调审批后规划产品查询、等待人工确认销售条件、调用确定性报价计算并生成邮件草稿；人工审批具体草稿版本后，邮件工具才允许发送
+- 客户原始邮件快照、调查计划、逐步执行记录、证据和背调结论保存在同一报告版本中，邮件原件仍以不可覆盖的对象归档为准
+- 最终报告可单独配置 DeepSeek V4 Pro；密钥未配置时明确回退到主模型，外部工具未配置时保留调查缺口
+- 报价角色查询产品、库存及参考价格；业务员谈判后录入最终销售单价，确定性工具计算正式报价
+- 主业务数据库保存客户编号、询盘状态、报告、审批、报价版本、客户同意快照及任务队列
+- 背调运行上下文仅在 Redis 中短期保存；完整邮件原件存 S3，业务数据库保存关联信息
+- 等待人工或客户时不保持 Agent 运行；恢复后读取业务状态和版本继续执行
+- 客户门户 Agent 使用独立的客服提示词、会话目录和公开知识检索工具，不继承内部员工工具
+- 内部员工聊天仍沿用现有 LangGraph runtime；询盘工作流不依赖聊天会话存活
 
 ### 邮件与审批闭环
 
@@ -71,51 +74,32 @@ NanoClaw 把内部工作台、独立客户门户、CLI、QQ 和飞书收到的�
 
 ```mermaid
 flowchart LR
-    Staff["内部人员"] --> InternalChannels["CLI / Web / QQ / 飞书"]
-    Customer["外部客户"] --> Portal["独立客户门户"]
-
-    InternalChannels --> Auth["登录 / JWT 验证"]
-    Portal --> Auth
-    Auth --> Bus["MessageBus"]
-    Bus --> RBAC["RBAC 允许的 Agent 集合"]
-    RBAC --> Route["小模型入口分类"]
-    Route --> Gateway["Gateway"]
-
-    Gateway --> InternalAgent["内部外贸询盘与报价 Agent"]
-    Gateway --> CustomerAgent["客户产品咨询 Agent"]
-
-    InternalAgent --> LocalTools["本地受控工具"]
-    InternalAgent --> MCP["MCP 业务工具"]
-    InternalAgent --> ShortMemory["SQLite 短期记忆"]
-    InternalAgent --> LongMemory["MySQL 结构化长期记忆"]
-    LongMemory --> SemanticMemory["Milvus 长期语义索引"]
-
-    CustomerAgent --> PublicTools["公开知识 / 公开产品"]
-    CustomerAgent -. "最小化只读分析" .-> Peer["Workspace Peer"]
-    Peer --> DisclosureGate["公开结果校验门"]
-    DisclosureGate --> CustomerAgent
-
-    MCP --> Business["询盘 / 产品 / 报价 / 审批"]
-    MCP --> RAG["企业知识库 RAG"]
-    Business --> Database["SQLite 默认 / MySQL 可选"]
-    RAG --> Indexes["Memory 默认 / pgvector / Milvus / Elasticsearch"]
+    Mail["邮件 / WhatsApp 导入"] --> W["询盘状态机与任务队列"]
+    Mail --> S3["S3 邮件原件"]
+    W --> Extract["意图识别 / 结构化抽取 / 补充缺失字段"]
+    Extract --> Plan["背调 Planner"]
+    Plan --> Execute["官网 / 地图 / 海关 / 新闻 Executor"]
+    Execute --> Evaluate["证据与缺口检查"]
+    Evaluate --> Research["DeepSeek V4 Pro 报告生成"]
+    Research <--> Redis["Redis 短期调查上下文"]
+    Research --> Review["暂停：人工确认背调"]
+    Review --> Prepare["查询产品 / 库存 / 价格"]
+    Prepare --> Negotiate["暂停：业务员谈判"]
+    Negotiate --> Calculate["恢复：计算最终报价"]
+    Calculate --> Approve["暂停：报价审批"]
+    Approve --> Send["归档邮件并发送"]
+    Send --> Accept["客户同意后人工核实"]
+    Accept --> DB["主业务数据库：客户编号 / 报告 / 报价及确认快照"]
+    W <--> DB
 ```
 
-主处理链路是：
-
-```text
-登录 → JWT → 服务端验签 → RBAC → 小模型路由（需要时）→ Gateway → 现有 Agent → 回复
-```
-
-客户产品咨询 Agent 不是内部外贸询盘与报价 Agent 的换皮版本。两者之间的权限边界在服务端组装、数据查询和输出校验三个层面同时生效。
-
-入口采用严格账号域映射：客户账号只允许客户产品咨询 Agent，内部员工账号
-只允许内部外贸询盘与报价 Agent。其稳定技术路由 ID 仍为 `internal_quote_reply`，
-避免破坏已有接口和会话。当前每个账号域只有一个允许的 Agent，因此直接由
-RBAC 确定，不额外调用小模型；小模型分类器仅在未来某个角色明确获准使用多个
-Agent 时启用。两个 Agent、RAG 和工具的内部实现保持不变。
+业务流程由状态机推进，背调与报价通过询盘编号及报告版本交接。人工审批和谈判是持久化暂停点。客户原文、网页及模型输出不能直接批准报价或改变发送状态。内部账号仍使用 `internal_quote_reply` 路由；客户账号没有可用的 Agent 路由。
 
 ## 快速开始
+
+如果用于面试演示，可直接运行 `scripts/start_demo.ps1`，并在演示前运行
+`scripts/demo_doctor.ps1`。完整步骤见
+[面试演示运行手册](docs/guides/面试演示运行手册.md)。演示模式的本地调查结果会在页面中明确标记。
 
 ### 环境要求
 
@@ -175,7 +159,8 @@ Manager 默认打开 `http://127.0.0.1:3000/ui/`，用于管理 Gateway 状态�
 |---|---|---|---|
 | 营销首页 | `http://127.0.0.1:8765/` | 开启 | 产品介绍与入口导航 |
 | 内部工作台 | `http://127.0.0.1:8765/workspace` | 开启 | 内部会话、知识库、邮箱和业务协作 |
-| 客户门户 | `http://127.0.0.1:8766/` | 开启 | 客户安全对话与公开信息查询 |
+| 询盘工作台 | `http://127.0.0.1:8765/inquiries` | 开启 | 背调审核、谈判恢复、报价审批和客户确认 |
+| 客户智能客服 | `http://127.0.0.1:8766/` | 开启 | 面向客户的产品与售后咨询 |
 | 独立工作台 | `http://127.0.0.1:8767/` | 关闭 | 与营销首页分端口运行的完整工作台 |
 | Manager | `http://127.0.0.1:3000/ui/` | 单独启动 | Gateway 与 MCP 管理 |
 
@@ -205,14 +190,14 @@ nanoclaw/
 ├─ gateway.py               # 消息路由、会话隔离与并发控制
 ├─ config.py                # 配置模型、环境变量与安全校验
 ├─ employee_agent/          # 独立 LangGraph 内部员工 Agent runtime
-├─ agent/                   # NanoClaw 适配、客户 Agent、工具与记忆运行时
+├─ agent/                   # NanoClaw 适配、询盘工作流、工具与记忆运行时
 ├─ bus/                     # 入站与出站异步消息队列
-├─ channels/                # CLI、Web、客户门户、QQ、飞书与邮件渠道
+├─ channels/                # CLI、Web、询盘工作台、QQ、飞书与邮件渠道
 ├─ manager/                 # Gateway/MCP 管理服务和管理界面
 ├─ mcp_servers/             # 正式启用的外贸业务 MCP 服务入口
 ├─ examples/mcp/            # 不进入正式运行配置的 MCP 示例
 ├─ providers/               # OpenAI 兼容模型 Provider
-├─ prompts/                 # 内部员工与外部客户身份提示词
+├─ prompts/                 # 内部员工身份提示词及历史提示资料
 ├─ session/                 # 会话、对话索引与迁移工具
 ├─ skills/                  # NanoClaw 运行时可加载的业务 Skills
 ├─ trade_rag/               # 文档导入、切块、检索、生成与向量后端

@@ -110,8 +110,10 @@ def _error_code(exc: Exception) -> str:
 class ManagedVectorStore:
     """Keeps the application alive without falling back to a different data backend."""
 
-    def __init__(self, config: RagVectorConfig | None = None, *, retry_seconds: float = 5.0):
+    def __init__(self, config: RagVectorConfig | None = None, *, retry_seconds: float = 5.0,
+                 model_id: str | None = None):
         self.config = config
+        self.model_id = model_id
         self.retry_seconds = retry_seconds
         self._delegate = None
         self._last_attempt = 0.0
@@ -136,7 +138,7 @@ class ManagedVectorStore:
         try:
             if self.config is None:
                 self.config = load_rag_vector_config()
-            self._delegate = create_vector_store(self.config)
+            self._delegate = create_vector_store(self.config, model_id=self.model_id)
             vector_runtime_state.checked(self.config.backend, True)
             return True
         except Exception as exc:
@@ -175,12 +177,20 @@ class ManagedVectorStore:
     def upsert(self, children, source, vectors) -> int:
         return self._call("upsert", children, source, vectors)
 
-    def search(self, vector, actor, limit: int = 30):
+    def search(self, vector, actor, limit: int = 30, allowed_document_ids=()):
+        if allowed_document_ids:
+            return self._call(
+                "search", vector, actor, limit,
+                allowed_document_ids=allowed_document_ids,
+            )
+        # Preserve the legacy call shape for third-party delegates; the hybrid
+        # retriever only requests backend scoping when a scope actually exists.
         return self._call("search", vector, actor, limit)
 
     def delete_by_document(self, document_id: str, version: int | None = None) -> int:
         return self._call("delete", document_id, version)
 
 
-def create_application_vector_store(config: RagVectorConfig | None = None) -> ManagedVectorStore:
-    return ManagedVectorStore(config)
+def create_application_vector_store(config: RagVectorConfig | None = None,
+                                    *, model_id: str | None = None) -> ManagedVectorStore:
+    return ManagedVectorStore(config, model_id=model_id)

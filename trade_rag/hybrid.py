@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import replace
+import inspect
 from .contracts import Actor, SearchResult
 
 class HybridRetriever:
@@ -10,13 +11,38 @@ class HybridRetriever:
         self.semantic_weight, self.keyword_weight, self.rrf_k = semantic_weight, 1 - semantic_weight, rrf_k
         self.last_mode = "unavailable"
 
-    def search(self, query: str, actor: Actor, limit: int = 30):
+    @staticmethod
+    def _search_store(store, value, actor, limit, allowed_document_ids):
+        parameters = inspect.signature(store.search).parameters.values()
+        supports_scope = (
+            any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters)
+            or any(parameter.name == "allowed_document_ids" for parameter in parameters)
+        )
+        if supports_scope:
+            return store.search(
+                value, actor, limit,
+                allowed_document_ids=allowed_document_ids,
+            )
+        rows = store.search(value, actor, limit)
+        allowed = set(allowed_document_ids)
+        return [row for row in rows if not allowed or row.source.document_id in allowed]
+
+    def search(self, query: str, actor: Actor, limit: int = 30,
+               allowed_document_ids=()):
         semantic=[]; keyword=[]
         if self.semantic_store is not None and self.embedder is not None:
-            try: semantic=self.semantic_store.search(self.embedder.embed([query])[0], actor, limit)
+            try:
+                vector = (self.embedder.embed_query(query) if hasattr(self.embedder, "embed_query")
+                          else self.embedder.embed([query])[0])
+                semantic = self._search_store(
+                    self.semantic_store, vector, actor, limit, allowed_document_ids,
+                )
             except Exception: semantic=[]
         if self.keyword_store is not None:
-            try: keyword=self.keyword_store.search(query, actor, limit)
+            try:
+                keyword=self._search_store(
+                    self.keyword_store, query, actor, limit, allowed_document_ids,
+                )
             except Exception: keyword=[]
         if semantic and keyword: self.last_mode="hybrid"
         elif semantic: self.last_mode="semantic"

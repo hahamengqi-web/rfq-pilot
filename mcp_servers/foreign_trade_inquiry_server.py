@@ -289,12 +289,10 @@ def approve_outbound_message(quote_id: int, action: str = "request", reviewer: s
 
 if __name__ == "__main__":
     cfg = load_business_config()
-    init_db()
-    from agent.business.seed_data import seed_database
-    if seed_database():
-        print("[QuoteBusiness] 种子数据已导入")
-    print(f"[QuoteBusiness] 数据库就绪: {cfg.mysql_database}@{cfg.mysql_host}:{cfg.mysql_port}", file=sys.stderr)
-    print(f"[QuoteBusiness] LLM: {cfg.llm_model}")
+    # MCP discovery must not depend on a migrated business database. Individual
+    # business calls still validate their own database requirements.
+    print(f"[QuoteBusiness] 数据库目标: {cfg.mysql_database}@{cfg.mysql_host}:{cfg.mysql_port}", file=sys.stderr)
+    print(f"[QuoteBusiness] LLM: {cfg.llm_model}", file=sys.stderr)
     print(f"[QuoteBusiness] 后端: {cfg.database_backend}", file=sys.stderr)
     print(f"[QuoteBusiness] 汇率: {len(cfg.exchange_rates)} 种货币", file=sys.stderr)
     try:

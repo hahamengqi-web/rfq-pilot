@@ -36,6 +36,11 @@ LAUNCHER_PORT = 3000
 LAUNCHER_CONFIG_PATH = MANAGER_DIR / "launcher_config.json"
 
 PROJECT_MCP_SERVERS = {
+    "inquiry_workflow_tools": {
+        "module": "mcp_servers.inquiry_workflow_tools_server",
+        "path": NANOCLAW_DIR / "mcp_servers" / "inquiry_workflow_tools_server.py",
+        "description": "Auditable due diligence, catalog and deterministic quote MCP tools",
+    },
     "foreign_trade_inquiry": {
         "module": "mcp_servers.foreign_trade_inquiry_server",
         "path": NANOCLAW_DIR / "mcp_servers" / "foreign_trade_inquiry_server.py",

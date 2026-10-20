@@ -120,9 +120,9 @@ def test_customer_mobile_navigation_and_foreign_language_prompts_are_available()
 
     assert 'data-prompt-key="prompt.usbcText"' in page
     assert 'data-i18n="assistant.identity"' in page
-    assert "NanoClaw Product Advisor" in script
-    assert "USB-C-Datenkabel" in script
-    assert "Which industrial tablets do you offer?" in script
+    assert "Product Support" in script
+    assert "Produktservice" in script
+    assert "How many LAN ports does the Archer AX55 have?" in script
     assert "language: lang" in script
     assert 'id="quoteRequest"' in page
     assert "safeAssistantMessage" in script

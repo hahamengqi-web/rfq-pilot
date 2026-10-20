@@ -27,8 +27,8 @@ class SmtpSslSender:
         self.smtp_factory = smtp_factory
         self._presets = {item.provider.value: item for item in EMAIL_PROVIDER_PRESETS}
 
-    def send(self, delivery: dict, account: dict) -> str | None:
-        preset = self._presets[account["provider"]]
+    @staticmethod
+    def build_message(delivery: dict, account: dict) -> EmailMessage:
         message = EmailMessage()
         message["From"] = f'{account["sender_name"]} <{account["address"]}>'
         message["To"] = delivery["recipient"]
@@ -41,6 +41,19 @@ class SmtpSslSender:
             message["In-Reply-To"] = delivery["in_reply_to"]
             message["References"] = delivery["in_reply_to"]
         message.set_content(delivery["body_snapshot"])
+        if delivery.get("quotation_html"):
+            message.add_attachment(delivery["quotation_html"].encode("utf-8"),
+                                   maintype="text", subtype="html", filename="quotation.html")
+        return message
+
+    def send(self, delivery: dict, account: dict) -> str | None:
+        preset = self._presets[account["provider"]]
+        if delivery.get("original_bytes"):
+            from email import policy
+            from email.parser import BytesParser
+            message = BytesParser(policy=policy.default).parsebytes(delivery["original_bytes"])
+        else:
+            message = self.build_message(delivery, account)
         client = None
         try:
             auth_code = self.secret_store.get(account["secret_ref"])
@@ -49,7 +62,10 @@ class SmtpSslSender:
                 context=ssl.create_default_context(),
             )
             client.login(account["address"], auth_code)
-            refused = client.send_message(message)
+            if delivery.get("original_bytes"):
+                refused = client.sendmail(account["address"], [delivery["recipient"]], delivery["original_bytes"])
+            else:
+                refused = client.send_message(message)
             if refused:
                 raise SmtpDeliveryError("email_smtp_recipient_refused", permanent=True)
             return message["Message-ID"]

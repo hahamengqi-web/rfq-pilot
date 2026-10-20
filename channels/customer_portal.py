@@ -31,6 +31,7 @@ from session.customer_conversation import (
 )
 from channels.access_auth_api import ACCESS_COOKIE, bearer_token
 from agent.access_control.models import Principal
+from agent.customer_service.handoffs import CustomerHandoffService
 
 
 def create_app() -> FastAPI:
@@ -45,7 +46,8 @@ class CustomerPortalChannel(Channel):
                  email_account_service: EmailAccountService | None = None,
                  identity_service: CustomerIdentityService | None = None,
                  conversation_repository: CustomerConversationRepository | None = None,
-                 memory_service: CustomerMemoryService | None = None) -> None:
+                 memory_service: CustomerMemoryService | None = None,
+                 handoff_service: CustomerHandoffService | None = None) -> None:
         super().__init__(name="customer_portal", bus=bus)
         self.host = host
         self.port = port
@@ -55,6 +57,7 @@ class CustomerPortalChannel(Channel):
         self._identity_service = identity_service
         self._conversation_repository = conversation_repository
         self._memory_service = memory_service
+        self._handoff_service = handoff_service
         if (identity_service is None) != (conversation_repository is None):
             raise ValueError("customer_auth_dependencies_incomplete")
         self._auth_enabled = identity_service is not None
@@ -168,6 +171,36 @@ class CustomerPortalChannel(Channel):
                 sales_email = fallback
             return {"sales_email": sales_email}
 
+        def request_customer_id(request: Request) -> str | None:
+            if self._auth_enabled:
+                customer = self._identity_service.resolve(
+                    request.cookies.get(AUTH_COOKIE)
+                )
+                if customer is None:
+                    customer = self._identity_service.resolve_access(
+                        bearer_token(request.headers, request.cookies)
+                        or request.cookies.get(ACCESS_COOKIE)
+                    )
+                return customer.account_id if customer is not None else None
+            return self._customer_id(request.cookies.get(AUTH_COOKIE))
+
+        @app.get("/api/public/support-updates")
+        async def public_support_updates(
+                request: Request, conversation_id: str, limit: int = 100):
+            if self._handoff_service is None:
+                return {"items": []}
+            customer_id = request_customer_id(request)
+            if customer_id is None:
+                raise HTTPException(status_code=401, detail="customer_session_required")
+            try:
+                uuid.UUID(conversation_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="conversation_id_invalid") from exc
+            items = await self._handoff_service.customer_updates(
+                customer_id, conversation_id, limit=max(1, min(int(limit), 200)),
+            )
+            return {"items": items}
+
         @app.websocket("/ws")
         async def customer_websocket(websocket: WebSocket):
             owner = None
@@ -244,6 +277,11 @@ class CustomerPortalChannel(Channel):
                     self._request_hashes.setdefault(request_scope, {})[request_id] = digest
                     self._bindings[client_id] = conversation_id
                     self._active_requests.setdefault(client_id, set()).add(request_id)
+                    await websocket.send_json({
+                        "type": "assistant.progress", "protocol_version": 2,
+                        "conversation_id": conversation_id, "request_id": request_id,
+                        "metadata": {"stage": "received"},
+                    })
                     if owner is not None:
                         self._conversation_repository.append_message(
                             owner, conversation_id, role="user", content=content.strip(),
@@ -257,6 +295,7 @@ class CustomerPortalChannel(Channel):
                         content=content.strip(),
                         raw={"event": "chat.message", "conversation_id": conversation_id,
                              "request_id": request_id, "language": language,
+                             "customer_id": customer_id,
                              **({"tenant_id": owner.tenant_id, "account_id": owner.account_id}
                                 if owner else {}),
                              **({"_principal": Principal(
@@ -317,10 +356,12 @@ class CustomerPortalChannel(Channel):
                     "conversation_id": message.conversation_id,
                     "request_id": message.request_id,
                 }
+                if message.metadata:
+                    payload["metadata"] = dict(message.metadata)
                 if message.error_code:
                     payload["code"] = message.error_code
                 await websocket.send_json(payload)
-                if message.request_id:
+                if message.request_id and message.event_type != "assistant.progress":
                     active = self._active_requests.get(message.chat_id)
                     if active is not None:
                         active.discard(message.request_id)
@@ -329,7 +370,10 @@ class CustomerPortalChannel(Channel):
             owner = self._connection_owners.get(message.chat_id)
             if owner is not None and message.conversation_id:
                 self._conversation_repository.append_message(
-                    owner, message.conversation_id, role="assistant", content=message.content,
+                    owner, message.conversation_id, role="assistant", content={
+                        "text": message.content,
+                        "citations": list(message.metadata.get("citations") or ())[:5],
+                    },
                     request_id=message.request_id,
                 )
             await websocket.send_json({
@@ -338,6 +382,7 @@ class CustomerPortalChannel(Channel):
                 "conversation_id": message.conversation_id,
                 "request_id": message.request_id,
                 "content": message.content,
+                "citations": list(message.metadata.get("citations") or ())[:5],
             })
             if message.request_id:
                 active = self._active_requests.get(message.chat_id)

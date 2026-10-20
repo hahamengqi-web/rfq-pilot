@@ -6,6 +6,7 @@ from trade_rag.contracts import Actor, DocumentStatus, QueryRequest
 from trade_rag.chunking import ParentChildSplitter
 from trade_rag.loaders import ApprovalWorkflow, DocumentLoader
 from trade_rag.pipeline import RagPipeline
+from trade_rag.stores import InMemoryVectorStore
 
 class PipelineTests(unittest.TestCase):
     def approved_doc(self):
@@ -19,7 +20,7 @@ class PipelineTests(unittest.TestCase):
         return doc
 
     def test_index_query_and_acl(self):
-        pipe = RagPipeline(); pipe.index(self.approved_doc())
+        pipe = RagPipeline(store=InMemoryVectorStore()); pipe.index(self.approved_doc())
         ok = pipe.query(QueryRequest("SKU-A warranty", Actor("u", frozenset({"sales"}))))
         self.assertEqual(ok["status"], "ANSWERED"); self.assertTrue(ok["citations"])
         self.assertEqual(ok["retrieval_mode"], "hybrid")
@@ -27,7 +28,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(denied["status"], "NO_EVIDENCE")
 
     def test_dynamic_route(self):
-        pipe = RagPipeline(); pipe.index(self.approved_doc())
+        pipe = RagPipeline(store=InMemoryVectorStore()); pipe.index(self.approved_doc())
         result = pipe.query(QueryRequest("当前 SKU-A 库存", Actor("u", frozenset({"sales"}))))
         self.assertEqual(result["status"], "BUSINESS_DATA_REQUIRED")
 
@@ -38,11 +39,32 @@ class PipelineTests(unittest.TestCase):
             calls = 0
             last_status = "not_called"
             def rerank(self, query, results, top_k=None): self.calls += 1; self.last_status = "success"; return results[:top_k]
-        pipe = RagPipeline(rewriter=Rewriter(), splitter=ParentChildSplitter(parent_chars=100, child_chars=12, overlap=2)); pipe.index(self.approved_doc())
+        pipe = RagPipeline(store=InMemoryVectorStore(), rewriter=Rewriter(), splitter=ParentChildSplitter(parent_chars=100, child_chars=12, overlap=2)); pipe.index(self.approved_doc())
         reranker = Reranker(); pipe.reranker = reranker
         pipe.gate = type("HighConfidenceGate", (), {"classify": lambda self, results: "HIGH_CONFIDENCE"})()
         result = pipe.query(QueryRequest("SKU-A warranty", Actor("u", frozenset({"sales"}))))
         self.assertEqual(result["query_count"], 2)
         self.assertEqual(reranker.calls, 1)
+
+    def test_allowed_documents_receive_balanced_backend_recall(self):
+        pipe = RagPipeline(store=InMemoryVectorStore())
+
+        class Retriever:
+            last_mode = "semantic"
+            calls = []
+            def search(self, query, actor, limit, allowed_document_ids=()):
+                self.calls.append(frozenset(allowed_document_ids))
+                return []
+
+        retriever = Retriever()
+        pipe.retriever = retriever
+        pipe.query(QueryRequest(
+            "software features", Actor("u", frozenset({"sales"})),
+            allowed_document_ids=("large-manual", "small-datasheet"),
+        ))
+        self.assertEqual(
+            retriever.calls,
+            [frozenset({"large-manual"}), frozenset({"small-datasheet"})],
+        )
 
 if __name__ == "__main__": unittest.main()

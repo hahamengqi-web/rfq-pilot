@@ -47,6 +47,8 @@ $env:RAG_VECTOR_DIMENSIONS='64'
 
 只启动 Milvus、etcd 和 MinIO：
 
+MinIO 默认使用官方 Quay 仓库的固定版本。若当前机器无法访问仓库、但已有可用的本地镜像，可在被忽略的 `deploy/docker/.env` 中设置 `DOCKER_MINIO_IMAGE` 为本地镜像标签，并设置 `DOCKER_MINIO_PULL_POLICY=never`。该设置仅适用于镜像已缓存的机器；换机部署仍需先取得镜像。
+
 ```powershell
 docker compose --env-file deploy\docker\.env `
   -f deploy\docker\compose.yaml --profile vector-milvus up -d
@@ -54,7 +56,7 @@ docker compose --env-file deploy\docker\.env `
 
 M3 已启用 Milvus 鉴权。先运行 `generate_secrets.ps1` 补齐被忽略的 Docker `.env`，再使用 root 管理 token 显式执行 `python -m trade_rag.milvus_admin` 的鉴权初始化、代次创建、alias 切换或回滚。应用只使用受限 token，默认后端仍为 `memory`。
 
-M4 应用运行时通过 `RAG_VECTOR_BACKEND=memory|sqlite|pgvector|milvus` 选择后端。当前本机 `.env` 使用 SQLite 持久索引；未加载项目 `.env` 时的代码兜底仍为 `memory`。Web提供 `/healthz`、`/readyz`、受保护的 `/api/rag/metrics` 和 `/metrics/rag`；后端故障不会回退到另一数据源。告警规则示例见 `rag-alert-rules.example.yaml`。
+M4 应用运行时通过 `RAG_VECTOR_BACKEND=memory|sqlite|pgvector|milvus` 选择向量后端，并通过 `RAG_KEYWORD_BACKEND=memory|sqlite|elasticsearch` 选择关键词后端。当前本机 `.env` 使用 Milvus 持久向量索引和 Elasticsearch 关键词索引；未加载项目 `.env` 时的代码兜底仍为 `memory`。Web提供 `/healthz`、`/readyz`、受保护的 `/api/rag/metrics` 和 `/metrics/rag`；后端故障不会回退到另一数据源。告警规则示例见 `rag-alert-rules.example.yaml`。
 
 只启动 Elasticsearch 关键词服务：
 

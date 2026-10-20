@@ -106,7 +106,12 @@ def init_db() -> None:
             "SELECT table_name FROM information_schema.tables WHERE table_schema=%s",
             (cfg.mysql_database,),
         )
-        actual = {row["table_name"] for row in cur.fetchall()}
+        # MySQL drivers and server settings may preserve the metadata column as
+        # TABLE_NAME. Treat result keys case-insensitively during startup.
+        actual = {
+            next((value for key, value in row.items() if str(key).casefold() == "table_name"), "")
+            for row in cur.fetchall()
+        }
     missing = sorted(required - actual)
     if missing:
         raise RuntimeError("trade_ops migration is incomplete; missing tables: " + ", ".join(missing))

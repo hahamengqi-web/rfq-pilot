@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>企业内部工作台 · NanoClaw</title><link rel="stylesheet" href="/static/inquiries.css?v=20261018-follow-up"></head>
+<body><header class="topbar"><div><span class="eyebrow">NANOCLAW · INTERNAL WORKSPACE</span><h1>企业内部工作台</h1><p>询盘、客服、知识库和系统运行集中管理</p></div><button id="refresh" type="button">刷新当前模块</button></header>
+<nav class="module-nav" aria-label="内部工作模块"><button type="button" class="active" data-module="inquiries">询盘工作流</button><button type="button" data-module="support">人工客服</button><button type="button" data-module="knowledge">RAG 知识库</button><a class="module-nav-link" href="/workspace?view=email">邮箱设置</a><button type="button" data-module="fallback">演示备用</button><button type="button" data-module="system">系统管理</button></nav>
+<section id="inquiriesModule" class="workspace-module">
+<div class="workspace-intro"><div><h2>从新询盘到回复客户</h2><p>查看每条询盘的当前阶段、来源和下一步；背调与正式报价由人员确认。</p></div><p id="notice" role="status">正在加载…</p></div>
+<div id="demoControl" class="demo-control" hidden><div><strong>固定演示案例 · Northstar Retail</strong><p id="demoMailStatus">正在读取邮箱收件状态…</p></div><div class="demo-control-actions"><button id="demoCreate" type="button">创建新的演示询盘</button><button id="demoToggle" type="button">查看全部历史</button></div></div>
+<section id="overview" class="overview" aria-label="询盘阶段总览"></section>
+<main class="workspace-grid"><aside class="case-sidebar"><div class="case-sidebar-head"><h2>客户询盘</h2><input id="caseSearch" type="search" placeholder="搜索客户、邮箱或询盘编号" aria-label="搜索询盘"></div><div id="caseFilters" class="case-filters" aria-label="按阶段筛选"></div><div class="case-selection-toolbar"><button id="selectVisibleCases" type="button">全选当前列表</button><button id="clearSelectedCases" type="button">取消选择</button><button id="deleteSelectedCases" type="button" disabled>删除选中（0）</button></div><div id="cases" class="case-list"></div><details class="import-panel"><summary>导入原始邮件</summary>
+<form id="email-import"><label>已配置的邮箱编号<input name="account" required></label><label>邮件原件（.eml）<input name="file" type="file" accept=".eml,message/rfc822" required></label><button>归档并导入</button></form></details>
+<details><summary>录入 WhatsApp 客户消息</summary><form id="wa-import">
+<label>客户号码<input name="sender" required></label><label>客户姓名<input name="name"></label><label>原消息编号<input name="id" required></label>
+<label>原发送时间<input name="sent_at" type="datetime-local" required></label><label>消息原文<textarea name="text" required></textarea></label>
+<label><input name="attach" type="checkbox"> 关联当前询盘</label><button>保存来源并导入</button></form></details></aside>
+<section id="detail" class="case-detail"><div class="empty-detail"><strong>选择一条询盘</strong><p>这里会显示客户资料、背调证据、报价草稿和当前可执行的操作。</p></div></section></main>
+</section>
+<section id="supportModule" class="workspace-module support-module" hidden>
+  <div class="workspace-intro"><div><span class="eyebrow">CUSTOMER SUPPORT</span><h2>人工客服工单</h2><p>查看 Agent 转人工的会话，接单并将回复送回客户页面。</p></div><p id="supportNotice" role="status">正在加载工单…</p></div>
+  <div id="supportStats" class="knowledge-stats"></div>
+  <div class="support-toolbar"><label>工单状态<select id="supportStatus"><option value="">全部</option><option value="pending">待接单</option><option value="assigned">处理中</option><option value="replied">已回复</option><option value="completed">已完成</option></select></label><button id="supportReload" type="button">刷新工单</button></div>
+  <main class="support-grid"><aside id="supportList" class="support-list"></aside><section id="supportDetail" class="support-detail"><div class="empty-detail"><strong>选择一条工单</strong><p>这里会显示客户问题、会话摘要和回复操作。</p></div></section></main>
+</section>
+<section id="knowledgeModule" class="workspace-module knowledge-module" hidden>
+  <div class="knowledge-heading"><div><span class="eyebrow">RAG KNOWLEDGE BASE</span><h2>产品与售后知识库</h2><p>导入资料后自动完成清洗、父子分块、向量索引和关键词索引。</p></div><div class="knowledge-actions"><label>文档权限<select id="knowledgeClassification"><option value="public">公开：可供客户客服检索</option><option value="internal">内部：仅供员工流程使用</option></select></label><button id="knowledgeImport" type="button">导入文件</button><input id="knowledgeFileInput" type="file" hidden accept=".txt,.md,.markdown,.html,.htm,.json,.csv,.pdf,.png,.jpg,.jpeg,.webp,text/plain,text/markdown,text/html,application/json,text/csv,application/pdf,image/png,image/jpeg,image/webp"></div></div>
+  <p id="knowledgeNotice" class="knowledge-notice" role="status">正在读取知识库…</p>
+  <div id="knowledgeStats" class="knowledge-stats"></div>
+  <div class="knowledge-toolbar"><input id="knowledgeSearch" type="search" placeholder="搜索文件名" aria-label="搜索知识库文件"><button id="knowledgeReload" type="button">刷新列表</button></div>
+  <div id="knowledgeList" class="knowledge-list" aria-live="polite"></div>
+</section>
+<section id="fallbackModule" class="workspace-module fallback-module" hidden>
+  <div class="workspace-intro"><div><span class="eyebrow">DEMO BACKUP</span><h2>演示备用信息</h2><p>外部接口暂不可用时，可打开、修改和复制说明。备用内容是人工演示说明，不是背调证据，也不会自动发送给客户。</p></div><p id="fallbackNotice" role="status">模板保存在当前浏览器。</p></div>
+  <div class="fallback-grid">
+    <article class="fallback-editor"><h3>备用消息模板</h3><label>故障环节<select id="fallbackCategory"><option value="official_website">公司官网</option><option value="map_lookup">地图地点</option><option value="customs_lookup">海关数据</option><option value="news_search">新闻搜索</option><option value="report_generation">背调报告生成</option><option value="product_catalog">产品与报价工具</option><option value="email_delivery">邮件发送</option><option value="other">其他接口</option></select></label><label>备用说明<textarea id="fallbackBody" rows="11" maxlength="4000" aria-label="备用说明"></textarea></label><p class="muted">编辑内容自动保存在当前浏览器。请勿填写密钥或真实客户隐私。</p><div class="fallback-actions"><button id="fallbackCopy" type="button">复制内容</button><button id="fallbackReset" type="button">恢复此项默认模板</button></div></article>
+    <article class="fallback-attach"><h3>关联当前演示询盘</h3><p id="fallbackCase">尚未选择询盘。</p><p class="muted">保存后会在该询盘的背调审批页面显示为“人工演示说明”。不会改动报告结论、证据或邮件内容。</p><button id="fallbackAttach" type="button">保存到当前询盘</button><div id="fallbackAttachedNotes"></div></article>
+  </div>
+</section>
+<section id="systemModule" class="workspace-module system-module" hidden>
+  <div class="workspace-intro"><div><span class="eyebrow">SYSTEM MANAGEMENT</span><h2>系统状态与配置</h2><p>查看客户入口、检索服务和知识库运行状态。密钥继续由服务端环境变量管理，不在页面回显。</p></div><p id="systemNotice" role="status">正在检查系统状态…</p></div>
+  <div id="systemStats" class="system-stats"></div>
+  <div class="system-grid">
+    <article><h3>服务入口</h3><dl id="systemEndpoints"></dl></article>
+    <article><h3>RAG 运行状态</h3><dl id="systemRag"></dl></article>
+    <article><h3>知识库状态</h3><dl id="systemKnowledge"></dl></article>
+    <article><h3>配置边界</h3><p>模型密钥、数据库密码和服务令牌只保存在服务端配置中。页面只显示是否可用，不显示凭据内容。</p><p class="muted">账号、角色和审计策略将在启用访问控制后由管理员模块接管。</p></article>
+  </div>
+</section>
+<script src="/static/inquiries.js?v=20261018-follow-up" defer></script></body></html>
+
+

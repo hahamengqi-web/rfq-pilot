@@ -18,6 +18,8 @@ class ManagerMcpDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(servers["foreign_trade_inquiry"]["configured"])
         self.assertTrue(servers["trade_rag"]["configured"])
         self.assertTrue(servers["trade_rag"]["entry_exists"])
+        self.assertTrue(servers["inquiry_workflow_tools"]["configured"])
+        self.assertTrue(servers["inquiry_workflow_tools"]["entry_exists"])
         self.assertTrue(servers["poetry"]["detected"])
         self.assertFalse(servers["poetry"]["configured"])
 
@@ -45,6 +47,23 @@ class ManagerMcpDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("foreign_trade_inquiry__search_product_catalog", tool_names)
             self.assertIn("foreign_trade_inquiry__query_trade_data", tool_names)
             self.assertEqual(len(tool_names), 8)
+        finally:
+            await manager.shutdown()
+
+    async def test_inquiry_workflow_mcp_stdio_handshake(self):
+        manager = MCPClientManager({
+            "inquiry_workflow_tools": {
+                "command": "{python}",
+                "args": ["-m", "mcp_servers.inquiry_workflow_tools_server"],
+            }
+        })
+        try:
+            await manager.connect_all(timeout=10)
+            tool_names = [tool.name for tool in manager.get_tools()]
+            self.assertIn("inquiry_workflow_tools__research_official_website", tool_names)
+            self.assertIn("inquiry_workflow_tools__research_map_lookup", tool_names)
+            self.assertIn("inquiry_workflow_tools__inquiry_calculate_final_quote", tool_names)
+            self.assertEqual(len(tool_names), 7)
         finally:
             await manager.shutdown()
 

@@ -35,7 +35,6 @@ RUN mkdir -p /app/workspace /app/data \
 
 USER 10001:10001
 
-EXPOSE 8765 8766 8767
+EXPOSE 8765 8767
 
 CMD ["/app/.venv/bin/python", "main.py"]
-

@@ -79,6 +79,7 @@ class OutboundMessage:
     request_id: str | None = None  # end-to-end correlation guard
     event_type: str = "assistant.message"
     error_code: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class MessageBus:

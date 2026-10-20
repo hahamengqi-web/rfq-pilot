@@ -1,0 +1,21 @@
+{
+  "schema_version": "public-product-catalog-v1",
+  "products": [
+    {
+      "public": true,
+      "sku": "ARCHER-AX55",
+      "model": "Archer AX55",
+      "name": "AX3000 Dual Band Gigabit Wi-Fi 6 Router",
+      "type": "无线路由器",
+      "aliases": ["路由器", "无线路由器", "router", "AX3000", "Wi-Fi 6", "wifi 6"],
+      "colors": ["黑色"],
+      "features": ["Wi-Fi 6", "4 个千兆 LAN 口", "1 个千兆 WAN 口", "USB 3.0", "4 根外置天线"],
+      "scenarios": ["家庭网络", "在线游戏", "4K 影音", "智能家居"],
+      "source_document_id": "web-f87125221ebd0d593c15ea55",
+      "source_version": 1,
+      "source_title": "Archer AX55(EU&US)1.0_Datasheet",
+      "source_page": 6,
+      "source_excerpt": "Ethernet Ports: 1 × Gigabit WAN Port + 4 × Gigabit LAN Ports; USB Ports: 1 × USB 3.0 Port."
+    }
+  ]
+}

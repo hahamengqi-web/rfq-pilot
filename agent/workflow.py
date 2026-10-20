@@ -133,7 +133,13 @@ class WorkflowService:
             raise WorkflowError("conversation_not_found", 404)
         with self._lock:
             runs = [run for run in self._read_runs() if run.conversation_id == normalized]
-        return sorted(runs, key=lambda run: run.updated_at, reverse=True)
+        # Filesystem and patched test clocks can produce identical timestamps.
+        # The append order is authoritative in that tie: the later run is the
+        # latest one and must be shown first.
+        indexed = list(enumerate(runs))
+        return [run for _, run in sorted(
+            indexed, key=lambda item: (item[1].updated_at, item[0]), reverse=True
+        )]
 
     def events(self, run_id: str, after_sequence: int = 0) -> list[WorkflowEvent]:
         with self._lock:

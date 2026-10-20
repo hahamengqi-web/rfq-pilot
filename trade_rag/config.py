@@ -90,8 +90,8 @@ class RagVectorConfig:
     def validate(self) -> None:
         if self.backend not in {"memory", "sqlite", "pgvector", "milvus"}:
             raise ValueError("RAG_VECTOR_BACKEND must be memory, sqlite, pgvector or milvus")
-        if self.dimensions != 64:
-            raise ValueError("M2/M3 requires RAG_VECTOR_DIMENSIONS=64")
+        if self.dimensions <= 0:
+            raise ValueError("RAG_VECTOR_DIMENSIONS must be greater than 0")
         if self.backend == "memory":
             return
         if self.backend == "sqlite":
@@ -212,10 +212,18 @@ class OcrConfig:
     pdf_dpi: int
     min_embedded_width: int
     min_embedded_height: int
+    max_concurrent_images: int = 4
+    vision_timeout_seconds: float = 30.0
+    vision_max_tokens: int = 900
+    vision_max_attempts: int = 1
+    vision_api_key: str = ""
+    vision_base_url: str = ""
+    vision_model: str = ""
+    vision_remote_approved: bool = False
 
     def __post_init__(self) -> None:
-        if self.provider != "paddleocr":
-            raise ValueError("RAG_OCR_PROVIDER must be paddleocr")
+        if self.provider not in {"paddleocr", "qwen_vl"}:
+            raise ValueError("RAG_OCR_PROVIDER must be paddleocr or qwen_vl")
         if self.device not in {"cpu", "gpu"}:
             raise ValueError("RAG_OCR_DEVICE must be cpu or gpu")
 
@@ -297,11 +305,23 @@ def load_pdf_ingestion_config() -> PdfIngestionConfig:
 
 def load_ocr_config() -> OcrConfig:
     _load_project_env()
+    vision_key = _first_env("RAG_VISION_API_KEY", "RAG_EMBEDDING_API_KEY")
+    vision_base_url = _first_env(
+        "RAG_VISION_BASE_URL", "RAG_EMBEDDING_BASE_URL"
+    ).rstrip("/")
     return OcrConfig(
         enabled=os.environ.get("RAG_OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
-        provider=os.environ.get("RAG_OCR_PROVIDER", "paddleocr").strip().lower(),
+        provider=os.environ.get("RAG_OCR_PROVIDER", "qwen_vl").strip().lower(),
         language=os.environ.get("RAG_OCR_LANGUAGE", "ch").strip() or "ch",
         device=os.environ.get("RAG_OCR_DEVICE", "cpu").strip().lower(),
+        vision_api_key=vision_key,
+        vision_base_url=vision_base_url,
+        vision_model=os.environ.get(
+            "RAG_VISION_MODEL", "Qwen/Qwen3-VL-32B-Instruct"
+        ).strip(),
+        vision_remote_approved=os.environ.get(
+            "RAG_VISION_REMOTE_APPROVED", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         min_confidence=_ratio("RAG_OCR_MIN_CONFIDENCE", 0.60),
         max_images_per_document=_positive_int("RAG_OCR_MAX_IMAGES_PER_DOCUMENT", 300),
         max_image_bytes=_positive_int("RAG_OCR_MAX_IMAGE_BYTES", 20 * 1024 * 1024),
@@ -310,4 +330,8 @@ def load_ocr_config() -> OcrConfig:
         pdf_dpi=_positive_int("RAG_OCR_PDF_DPI", 200),
         min_embedded_width=_positive_int("RAG_OCR_MIN_EMBEDDED_WIDTH", 64),
         min_embedded_height=_positive_int("RAG_OCR_MIN_EMBEDDED_HEIGHT", 64),
+        max_concurrent_images=_positive_int("RAG_OCR_MAX_CONCURRENT_IMAGES", 4),
+        vision_timeout_seconds=_positive_float("RAG_VISION_TIMEOUT_SECONDS", 30),
+        vision_max_tokens=_positive_int("RAG_VISION_MAX_TOKENS", 900),
+        vision_max_attempts=_positive_int("RAG_VISION_MAX_ATTEMPTS", 1),
     )

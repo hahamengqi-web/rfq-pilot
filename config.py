@@ -87,6 +87,22 @@ class NanoClawConfig:
     customer_product_default_level: str = "standard"
     customer_product_default_region: str = "GLOBAL"
     customer_product_default_currency: str = "USD"
+    # Customer-service Harness: short-term memory, routing and tool reliability.
+    customer_harness_redis_url: str = "redis://127.0.0.1:6379/4"
+    customer_harness_redis_prefix: str = "nanoclaw:customer-harness"
+    customer_harness_session_ttl_seconds: int = 604800
+    customer_harness_response_cache_ttl_seconds: int = 300
+    customer_harness_summary_turns: int = 15
+    customer_harness_recent_turns: int = 5
+    customer_harness_route_confidence: float = 0.70
+    customer_harness_private_context_transfer_approved: bool = False
+    customer_harness_tool_timeout_seconds: float = 45.0
+    customer_harness_tool_max_attempts: int = 2
+    customer_harness_backoff_base_seconds: float = 0.5
+    customer_harness_circuit_window: int = 12
+    customer_harness_circuit_failure_threshold: int = 8
+    customer_harness_circuit_consecutive_failures: int = 5
+    customer_harness_circuit_cooldown_seconds: int = 60
     # Reserved carrier adapter. It remains disabled until an official API is implemented.
     customer_shipping_enabled: bool = False
     customer_shipping_provider: str = "sf_international"
@@ -181,7 +197,7 @@ class NanoClawConfig:
     workspace_web_enabled: bool = False
     workspace_web_host: str = "127.0.0.1"
     workspace_web_port: int = 8767
-    customer_portal_enabled: bool = True
+    customer_portal_enabled: bool = False
     customer_portal_host: str = ""
     customer_portal_port: int = 8766
     customer_portal_public_url: str = ""
@@ -448,6 +464,69 @@ def load_config(config_path: str = "config.json") -> NanoClawConfig:
         "NANOCLAW_CUSTOMER_PRODUCT_DEFAULT_CURRENCY",
         config.customer_product_default_currency,
     ).strip().upper()
+    config.customer_harness_redis_url = os.environ.get(
+        "NANOCLAW_CUSTOMER_HARNESS_REDIS_URL",
+        config.customer_harness_redis_url,
+    ).strip()
+    config.customer_harness_redis_prefix = os.environ.get(
+        "NANOCLAW_CUSTOMER_HARNESS_REDIS_PREFIX",
+        config.customer_harness_redis_prefix,
+    ).strip()
+    config.customer_harness_private_context_transfer_approved = _env_bool(
+        "NANOCLAW_CUSTOMER_HARNESS_PRIVATE_CONTEXT_TRANSFER_APPROVED",
+        config.customer_harness_private_context_transfer_approved,
+    )
+    try:
+        config.customer_harness_session_ttl_seconds = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_SESSION_TTL_SECONDS",
+            config.customer_harness_session_ttl_seconds,
+        ))
+        config.customer_harness_response_cache_ttl_seconds = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_RESPONSE_CACHE_TTL_SECONDS",
+            config.customer_harness_response_cache_ttl_seconds,
+        ))
+        config.customer_harness_summary_turns = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_SUMMARY_TURNS",
+            config.customer_harness_summary_turns,
+        ))
+        config.customer_harness_recent_turns = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_RECENT_TURNS",
+            config.customer_harness_recent_turns,
+        ))
+        config.customer_harness_route_confidence = float(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_ROUTE_CONFIDENCE",
+            config.customer_harness_route_confidence,
+        ))
+        config.customer_harness_tool_timeout_seconds = float(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_TOOL_TIMEOUT_SECONDS",
+            config.customer_harness_tool_timeout_seconds,
+        ))
+        config.customer_harness_tool_max_attempts = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_TOOL_MAX_ATTEMPTS",
+            config.customer_harness_tool_max_attempts,
+        ))
+        config.customer_harness_backoff_base_seconds = float(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_BACKOFF_BASE_SECONDS",
+            config.customer_harness_backoff_base_seconds,
+        ))
+        config.customer_harness_circuit_window = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_CIRCUIT_WINDOW",
+            config.customer_harness_circuit_window,
+        ))
+        config.customer_harness_circuit_failure_threshold = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_CIRCUIT_FAILURE_THRESHOLD",
+            config.customer_harness_circuit_failure_threshold,
+        ))
+        config.customer_harness_circuit_consecutive_failures = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_CIRCUIT_CONSECUTIVE_FAILURES",
+            config.customer_harness_circuit_consecutive_failures,
+        ))
+        config.customer_harness_circuit_cooldown_seconds = int(os.environ.get(
+            "NANOCLAW_CUSTOMER_HARNESS_CIRCUIT_COOLDOWN_SECONDS",
+            config.customer_harness_circuit_cooldown_seconds,
+        ))
+    except ValueError as exc:
+        raise ValueError("customer Harness numeric settings are invalid") from exc
     config.customer_shipping_enabled = _env_bool(
         "NANOCLAW_CUSTOMER_SHIPPING_ENABLED", config.customer_shipping_enabled,
     )

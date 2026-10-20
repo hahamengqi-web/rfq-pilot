@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import logging
 import re
+import sys
 import traceback
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -50,7 +51,11 @@ def sanitize_data(value: Any) -> Any:
 
 def safe_print(*values: Any, **kwargs: Any) -> None:
     """Drop-in ``print`` replacement that masks every dynamic value."""
-    builtins.print(*(sanitize_text(value) for value in values), **kwargs)
+    stream = kwargs.get("file") or sys.stdout
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    sanitized = (sanitize_text(value) for value in values)
+    builtins.print(*(value.encode(encoding, errors="backslashreplace").decode(encoding)
+                     for value in sanitized), **kwargs)
 
 
 def safe_print_exception(exc: BaseException) -> None:

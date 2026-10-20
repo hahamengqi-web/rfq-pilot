@@ -221,6 +221,7 @@ def test_scanned_pdf_images_are_contiguous_and_become_image_chunks(tmp_path, mon
 
 
 def test_low_confidence_scanned_pdf_cannot_index_until_review(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAG_PDF_AUTO_ACCEPT_SAFE_REVIEW", "false")
     payload = b"%PDF-1.7 low confidence scan"
     parse_result = ParseResult(
         parser="fake", parser_version="fake-v1", pages=1, text_chars=0,

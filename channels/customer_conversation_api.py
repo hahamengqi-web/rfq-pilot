@@ -29,6 +29,15 @@ class UpdateConversationPayload(BaseModel):
     version: int = Field(ge=1)
 
 
+class FeedbackPayload(BaseModel):
+    """A customer's one-time rating for a specific assistant response."""
+
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(min_length=1, max_length=120)
+    helpful: bool
+    comment: str = Field(default="", max_length=1000)
+
+
 def create_customer_conversation_router(
     identity: CustomerIdentityService,
     repository: CustomerConversationRepository,
@@ -76,6 +85,25 @@ def create_customer_conversation_router(
             owner(request), conversation_id, cursor, limit
         ))
         return {"items": [asdict(item) for item in page.items], "next_cursor": page.next_cursor}
+
+    @router.post("/{conversation_id}/feedback", status_code=201)
+    async def record_feedback(
+        conversation_id: str, payload: FeedbackPayload, request: Request,
+        x_csrf_token: str | None = Header(None),
+    ):
+        """Persist feedback beside the conversation without exposing it as chat text."""
+        call(lambda: repository.append_message(
+            owner(request, csrf=x_csrf_token), conversation_id,
+            role="tool",
+            content={
+                "type": "customer_feedback",
+                "request_id": payload.request_id,
+                "helpful": payload.helpful,
+                "comment": payload.comment.strip(),
+            },
+            request_id=f"feedback:{payload.request_id}",
+        ))
+        return {"status": "recorded"}
 
     @router.patch("/{conversation_id}")
     async def update_conversation(

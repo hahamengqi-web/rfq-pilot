@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pdf_fixture_factory import build_fixture
 from trade_rag.knowledge_repository import KnowledgeRepository
 from trade_rag.pipeline import RagPipeline
+from trade_rag.stores import InMemoryVectorStore
 
 
 PAGE_SIZES = (20, 100, 300)
@@ -40,7 +41,7 @@ def run_benchmark(root: Path) -> dict:
             f"synthetic-{page_count}.pdf", payload, content_type="application/pdf"
         )
         parse_ms = (perf_counter() - started) * 1000
-        pipeline = RagPipeline()
+        pipeline = RagPipeline(store=InMemoryVectorStore())
         started = perf_counter()
         indexed = repository.index_pdf(
             imported["document_id"], index_prepared=pipeline.index_prepared

@@ -13,7 +13,7 @@ APP_ROLE = "nanoclaw_rag_rw"
 APP_PRIVILEGE_GROUP = "NanoClawVectorStore"
 APP_PRIVILEGES = (
     "Search", "Query", "Insert", "Upsert", "Delete", "Flush",
-    "Load", "GetLoadState", "DescribeAlias", "DescribeCollection",
+    "GetFlushState", "Load", "GetLoadState", "DescribeAlias", "DescribeCollection",
 )
 
 
@@ -72,10 +72,14 @@ def bootstrap_auth(*, uri: str, root_password: str, app_user: str, app_password:
         if APP_ROLE not in roles:
             admin.create_role(APP_ROLE)
         admin.grant_role(app_user, APP_ROLE)
-        groups = {item.get("privilege_group") for item in admin.list_privilege_groups()}
+        groups = {item.get("privilege_group"): item
+                  for item in admin.list_privilege_groups()}
         if APP_PRIVILEGE_GROUP not in groups:
             admin.create_privilege_group(APP_PRIVILEGE_GROUP)
-            admin.add_privileges_to_group(APP_PRIVILEGE_GROUP, list(APP_PRIVILEGES))
+        granted = set(groups.get(APP_PRIVILEGE_GROUP, {}).get("privileges") or ())
+        missing = sorted(set(APP_PRIVILEGES) - granted)
+        if missing:
+            admin.add_privileges_to_group(APP_PRIVILEGE_GROUP, missing)
         admin.grant_privilege_v2(APP_ROLE, APP_PRIVILEGE_GROUP, "*", db_name=database)
         admin.grant_privilege_v2(APP_ROLE, "DatabaseReadOnly", "*", db_name=database)
     finally:
@@ -185,10 +189,11 @@ class MilvusCollectionManager:
 
 
 def _admin_client():
-    uri = os.environ.get("RAG_MILVUS_URI", "").strip()
+    config = load_rag_vector_config()
+    uri = config.milvus_uri
     token = os.environ.get("RAG_MILVUS_ADMIN_TOKEN", "")
-    database = os.environ.get("RAG_MILVUS_DATABASE", "nanoclaw_vector_docker").strip()
-    timeout = int(os.environ.get("RAG_MILVUS_CONNECT_TIMEOUT_SECONDS", "5"))
+    database = config.milvus_database
+    timeout = config.milvus_connect_timeout_seconds
     if not uri or not token or not database:
         raise ValueError("missing Milvus admin configuration")
     return _new_client(uri, token, database, timeout)
@@ -222,7 +227,7 @@ def main() -> int:
     else:
         client = _admin_client()
         try:
-            manager = MilvusCollectionManager(client)
+            manager = MilvusCollectionManager(client, dimensions=load_rag_vector_config().dimensions)
             if args.create_generation is not None:
                 result = {"created": manager.create_generation(args.create_generation)}
             elif args.activate_generation is not None:

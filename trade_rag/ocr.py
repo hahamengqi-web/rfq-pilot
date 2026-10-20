@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import base64
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -149,6 +151,111 @@ class PaddleOcrProvider:
             return OcrOutput("", confidence, "no_text")
         status = "ready" if confidence is not None and confidence >= self.config.min_confidence else "low_confidence"
         return OcrOutput(text, confidence, status)
+
+
+class QwenVisionProvider:
+    """Turn product/document images into grounded, searchable Chinese text."""
+
+    model_id = "qwen-vision"
+
+    def __init__(self, config: OcrConfig | None = None, *, client=None):
+        self.config = config or load_ocr_config()
+        self._client = client
+        self.model_id = self.config.vision_model or self.model_id
+
+    def recognize(self, image_bytes: bytes) -> OcrOutput:
+        prompt = (
+            "你在为产品客服知识库解析产品手册图片。请只输出图片中可见且有依据的信息，"
+            "用于后续检索和客服答疑。先逐项准确抄录能辨认的文字、型号、接口名、数字和单位；"
+            "再简要说明图中标注、部件、箭头、步骤、指示灯状态之间明确展示的关系。"
+            "如果图片含表格，先将可辨认的表头和数据行转换为 Markdown 表格，保留行列关系；"
+            "保留原有单位和编号，不要补充图片之外的产品知识，不要猜测模糊内容；"
+            "看不清的字段写“无法辨认”。纯装饰或没有可用文字/技术信息的图片只输出“未发现可检索的产品信息”。"
+        )
+        return self._recognize(image_bytes, prompt)
+
+    def recognize_table(self, image_bytes: bytes) -> OcrOutput:
+        return self._recognize(image_bytes, (
+            "仅根据图片中的产品表格输出 Markdown 表格。保留原始表头、型号、数字、单位与行列对应关系。"
+            "合并单元格可重复填写明确可见的值；无法辨认的单元格写“无法辨认”。"
+            "不要猜测、解释或添加表外信息，不要使用代码围栏。"
+        ))
+
+    def _recognize(self, image_bytes: bytes, prompt: str) -> OcrOutput:
+        if not self.config.enabled:
+            raise OcrProcessingError("ocr_disabled")
+        if not self.config.vision_remote_approved:
+            raise OcrProcessingError("ocr_remote_transfer_not_approved")
+        if not self.config.vision_api_key or not self.config.vision_base_url or not self.config.vision_model:
+            raise OcrProcessingError("ocr_vision_api_not_configured")
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(image_bytes)) as image:
+                image.load()
+                if image.width * image.height > self.config.max_image_pixels:
+                    raise OcrProcessingError("ocr_image_pixel_limit_exceeded")
+                mime_type = Image.MIME.get(image.format, "image/png")
+        except OcrProcessingError:
+            raise
+        except Exception as exc:
+            raise OcrProcessingError("invalid_image") from exc
+
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        payload = {
+            "model": self.config.vision_model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:{mime_type};base64,{encoded}", "detail": "high",
+                    }},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+            "temperature": 0,
+            "max_tokens": self.config.vision_max_tokens,
+        }
+        last_error: Exception | None = None
+        text = ""
+        for attempt in range(self.config.vision_max_attempts):
+            try:
+                if self._client is None:
+                    import httpx
+                    response = httpx.post(
+                        f"{self.config.vision_base_url}/chat/completions",
+                        headers={"Authorization": f"Bearer {self.config.vision_api_key}"},
+                        json=payload,
+                        timeout=self.config.vision_timeout_seconds,
+                    )
+                else:
+                    response = self._client.post(
+                        f"{self.config.vision_base_url}/chat/completions",
+                        headers={"Authorization": f"Bearer {self.config.vision_api_key}"},
+                        json=payload,
+                        timeout=self.config.vision_timeout_seconds,
+                    )
+                response.raise_for_status()
+                data = response.json()
+                text = str(data["choices"][0]["message"].get("content") or "").strip()
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < self.config.vision_max_attempts:
+                    time.sleep(0.75)
+        if not text and last_error is not None:
+            raise OcrProcessingError("ocr_vision_recognition_failed") from last_error
+        if len(text) > self.config.max_ocr_chars_per_image:
+            raise OcrProcessingError("ocr_text_limit_exceeded")
+        if not text or text == "未发现可检索的产品信息":
+            return OcrOutput("", None, "no_text")
+        # The user accepts the model output as-is; do not block indexing on review.
+        return OcrOutput(text, None, "ready")
+
+
+def create_ocr_provider(config: OcrConfig):
+    if config.provider == "qwen_vl":
+        return QwenVisionProvider(config)
+    return PaddleOcrProvider(config)
 
 
 def validate_image_bytes(payload: bytes, mime_type: str, config: OcrConfig) -> tuple[int, int, bytes, str]:

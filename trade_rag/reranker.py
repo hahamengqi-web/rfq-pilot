@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections.abc import Callable
 from dataclasses import replace
 
 from .contracts import SearchResult
+from .config import RemoteApiConfig, load_rag_api_config
 
 
 class ListwiseReranker:
@@ -72,6 +74,99 @@ class ListwiseReranker:
             if isinstance(score, bool) or not isinstance(score, int) or not math.isfinite(score) or not 0 <= score <= 10: continue
             scores[idx] = score
         return scores
+
+
+class Qwen3Reranker:
+    """Call the SiliconFlow rerank API and retain source-row identity."""
+
+    def __init__(self, api: RemoteApiConfig, *, transfer_approved: bool,
+                 max_candidates: int = 30, client=None):
+        self.api = api
+        self.transfer_approved = transfer_approved
+        self.max_candidates = max(1, int(max_candidates))
+        self.client = client
+        self.model_id = api.model
+        self.last_status = "not_called"
+
+    def rerank(self, query: str, results: list[SearchResult],
+               top_k: int | None = None) -> list[SearchResult]:
+        limit = max(0, top_k if top_k is not None else len(results))
+        fallback = list(results[:limit])
+        if not results or limit == 0 or len(results) == 1:
+            self.last_status = "skipped"
+            return fallback
+        if not self.transfer_approved:
+            self.last_status = "remote_transfer_not_approved"
+            return fallback
+        if not self.api.configured:
+            self.last_status = "api_not_configured"
+            return fallback
+
+        candidates = results[:self.max_candidates]
+        payload = {
+            "model": self.api.model,
+            "query": query[:1000],
+            "documents": [row.child.text[:2000] for row in candidates],
+            "instruction": "根据产品咨询或售后问题，优先选择直接回答问题且包含明确产品型号、参数或操作条件的片段。",
+            "top_n": len(candidates),
+            "return_documents": False,
+        }
+        try:
+            import httpx
+            http = self.client or httpx
+            response = http.post(
+                f"{self.api.base_url}/rerank",
+                headers={"Authorization": f"Bearer {self.api.api_key}"},
+                json=payload, timeout=self.api.timeout_seconds,
+            )
+            response.raise_for_status()
+            items = response.json()["results"]
+        except Exception:
+            self.last_status = "request_failed"
+            return fallback
+
+        scores: dict[int, float] = {}
+        if not isinstance(items, list) or len(items) != len(candidates):
+            self.last_status = "invalid_response"
+            return fallback
+        for item in items:
+            if not isinstance(item, dict):
+                self.last_status = "invalid_response"
+                return fallback
+            index = item.get("index")
+            value = item.get("relevance_score")
+            if (isinstance(index, bool) or not isinstance(index, int)
+                    or index < 0 or index >= len(candidates) or index in scores
+                    or isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value)):
+                self.last_status = "invalid_response"
+                return fallback
+            scores[index] = float(value)
+        if len(scores) != len(candidates):
+            self.last_status = "invalid_response"
+            return fallback
+
+        ranked_indexes = sorted(scores, key=lambda index: (-scores[index], index))
+        ranked = [replace(
+            candidates[index], score=scores[index], rerank_score=scores[index],
+            retrieval_source=candidates[index].retrieval_source + "+rerank",
+        ) for index in ranked_indexes]
+        self.last_status = "success_partial" if len(results) > len(candidates) else "success"
+        return (ranked + list(results[len(candidates):]))[:limit]
+
+
+def create_application_reranker():
+    config = load_rag_api_config()
+    provider = os.environ.get("RAG_RERANK_PROVIDER", "qwen3").strip().lower()
+    if provider == "disabled":
+        return ListwiseReranker()
+    if provider != "qwen3":
+        raise ValueError("RAG_RERANK_PROVIDER must be qwen3 or disabled")
+    return Qwen3Reranker(
+        config.rerank,
+        transfer_approved=config.remote_data_transfer_approved,
+        max_candidates=config.rerank_max_candidates,
+    )
 
 
 def unique_parent_results(results: list[SearchResult], top_k: int) -> list[SearchResult]:

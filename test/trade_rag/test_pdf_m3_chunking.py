@@ -99,7 +99,9 @@ def test_pdf_splitter_has_stable_ids_exact_page_links_and_required_metadata():
 
 
 def test_long_table_children_repeat_header_and_do_not_cross_unrelated_blocks():
-    splitter = PdfAwareParentChildSplitter(parent_chars=240, child_chars=90, overlap=10)
+    splitter = PdfAwareParentChildSplitter(
+        parent_tokens=60, child_tokens=25, child_overlap_tokens=3
+    )
     parents, children = splitter.split(_document(), _parsed())
     table_children = [child for child in children if child.metadata["block_type"] == "table"]
     assert len(table_children) >= 2

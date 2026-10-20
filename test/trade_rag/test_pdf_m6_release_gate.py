@@ -10,6 +10,7 @@ from trade_rag.contracts import Actor, QueryRequest
 from trade_rag.knowledge_repository import KnowledgeRepository
 from trade_rag.pipeline import RagPipeline
 from trade_rag.release_gate import GateMetric, PdfReleaseGateReport, performance_summary
+from trade_rag.stores import InMemoryVectorStore
 from pdf_m6_benchmark import run_benchmark
 
 
@@ -26,7 +27,7 @@ def _cases():
 
 def _indexed_corpus(tmp_path):
     repository = KnowledgeRepository(tmp_path / "knowledge")
-    pipeline = RagPipeline()
+    pipeline = RagPipeline(store=InMemoryVectorStore())
     case_map = _cases()
     document_ids = {}
     for case_id in ("text_english", "text_bilingual", "table_units"):
@@ -78,7 +79,7 @@ def test_pdf_gold_recall_citations_no_answer_and_aggregate_report(tmp_path):
     assert not any(str(value) in serialized for value in document_ids.values())
     assert report.as_dict()["production_ready"] is False
 
-    empty_pipeline = RagPipeline()
+    empty_pipeline = RagPipeline(store=InMemoryVectorStore())
     no_answer = empty_pipeline.query(QueryRequest(
         "unrelated lunar geology evidence", actor, rerank=False
     ))
@@ -96,7 +97,7 @@ def test_pdf_acl_withdrawal_and_public_customer_disclosure_gate(tmp_path):
         "internal.pdf", build_fixture(cases["text_english"]), classification="internal",
         content_type="application/pdf",
     )
-    pipeline = RagPipeline()
+    pipeline = RagPipeline(store=InMemoryVectorStore())
     repository.index_pdf(public["document_id"], index_prepared=pipeline.index_prepared)
     repository.index_pdf(internal["document_id"], index_prepared=pipeline.index_prepared)
 
@@ -133,7 +134,7 @@ def test_pdf_restart_rebuild_security_limits_and_local_performance_observation(t
         started = perf_counter()
         imported = current.import_bytes("guide.pdf", payload, content_type="application/pdf")
         parse_ms.append((perf_counter() - started) * 1000)
-        pipeline = RagPipeline()
+        pipeline = RagPipeline(store=InMemoryVectorStore())
         started = perf_counter()
         current.index_pdf(imported["document_id"], index_prepared=pipeline.index_prepared)
         index_ms.append((perf_counter() - started) * 1000)
@@ -142,7 +143,7 @@ def test_pdf_restart_rebuild_security_limits_and_local_performance_observation(t
         document_id = imported["document_id"]
         restarted = KnowledgeRepository(root)
         document, parents, children = restarted.load_pdf_chunks(document_id)
-        rebuilt = RagPipeline()
+        rebuilt = RagPipeline(store=InMemoryVectorStore())
         result = rebuilt.index_prepared(document, parents, children)
         assert result["indexed_count"] == len(children)
 
@@ -186,7 +187,7 @@ def test_pdf_prompt_injection_is_inert_cited_evidence_not_an_action(tmp_path):
     imported = repository.import_bytes(
         "untrusted.pdf", build_fixture(injected_case), content_type="application/pdf"
     )
-    pipeline = RagPipeline()
+    pipeline = RagPipeline(store=InMemoryVectorStore())
     repository.index_pdf(imported["document_id"], index_prepared=pipeline.index_prepared)
     pipeline.gate = type(
         "HighConfidenceGate", (), {"classify": lambda self, results: "HIGH_CONFIDENCE"}
@@ -198,5 +199,6 @@ def test_pdf_prompt_injection_is_inert_cited_evidence_not_an_action(tmp_path):
     assert result["citations"][0]["document_id"] == imported["document_id"]
     assert result["citations"][0]["location"] == "page:1"
     assert set(result) == {
-        "status", "answer", "citations", "query_count", "rerank_status", "retrieval_mode"
+        "status", "answer", "citations", "query_count", "query_rewrite_status",
+        "rerank_status", "retrieval_mode"
     }

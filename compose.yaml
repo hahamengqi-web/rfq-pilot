@@ -16,23 +16,30 @@ services:
       # loopback-only on the host unless the operator explicitly changes it.
       NANOCLAW_WEB_HOST: 0.0.0.0
       NANOCLAW_WEB_PORT: "8765"
-      NANOCLAW_CUSTOMER_PORTAL_HOST: 0.0.0.0
-      NANOCLAW_CUSTOMER_PORTAL_PORT: "8766"
       NANOCLAW_WORKSPACE_WEB_HOST: 0.0.0.0
       NANOCLAW_WORKSPACE_WEB_PORT: "8767"
       NANOCLAW_CUSTOMER_PRODUCT_REDIS_URL: redis://redis:6379/0
       EMPLOYEE_AGENT_CHECKPOINT_BACKEND: redis
       EMPLOYEE_AGENT_REDIS_URL: redis://redis:6379/1
+      DUE_DILIGENCE_REDIS_URL: redis://redis:6379/3
+      NANOCLAW_MEMORY_MYSQL_HOST: mysql
+      BUSINESS_DATABASE_BACKEND: mysql
+      TRADE_OPS_MYSQL_HOST: mysql
+      TRADE_OPS_MYSQL_PORT: "3306"
+      TRADE_OPS_MYSQL_DATABASE: ${NANOCLAW_MEMORY_MYSQL_DATABASE:-nanoclaw_memory}
+      TRADE_OPS_MYSQL_USER: ${NANOCLAW_MEMORY_MYSQL_USER:-nanoclaw}
+      TRADE_OPS_MYSQL_PASSWORD: ${NANOCLAW_MEMORY_MYSQL_PASSWORD}
       PADDLE_PDX_CACHE_HOME: /app/.paddlex
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
     ports:
       - "${NANOCLAW_BIND_ADDRESS:-127.0.0.1}:${NANOCLAW_WEB_PUBLIC_PORT:-8765}:8765"
-      - "${NANOCLAW_BIND_ADDRESS:-127.0.0.1}:${NANOCLAW_CUSTOMER_PORTAL_PUBLIC_PORT:-8766}:8766"
     volumes:
       - nanoclaw_workspace:/app/workspace
       - nanoclaw_data:/app/data
     depends_on:
       redis:
+        condition: service_healthy
+      mysql:
         condition: service_healthy
     healthcheck:
       test:
@@ -55,6 +62,8 @@ services:
     image: redis:8-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - nanoclaw_redis:/data
     healthcheck:
@@ -66,8 +75,32 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${NANOCLAW_MEMORY_MYSQL_DATABASE:-nanoclaw_memory}
+      MYSQL_USER: ${NANOCLAW_MEMORY_MYSQL_USER:-nanoclaw}
+      MYSQL_PASSWORD: ${NANOCLAW_MEMORY_MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${NANOCLAW_MEMORY_MYSQL_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:${NANOCLAW_MEMORY_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - nanoclaw_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
 volumes:
   nanoclaw_workspace:
   nanoclaw_data:
   nanoclaw_redis:
+  nanoclaw_mysql:

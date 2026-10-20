@@ -50,7 +50,7 @@ def trusted(user_id: str, *roles: str) -> dict:
     ).to_trusted_dict()
 
 
-def test_customer_and_employee_accounts_have_strict_one_to_one_routes():
+def test_retired_customer_is_denied_and_employee_keeps_internal_route():
     provider = StubProvider(fail_if_called=True)
     classifier = LLMRouteClassifier(
         AgentRouteAuthorizer(), provider, model="small-router",
@@ -58,12 +58,12 @@ def test_customer_and_employee_accounts_have_strict_one_to_one_routes():
     customer = Principal("customer-a", "tenant-a", "customer-a", frozenset({"customer"}))
     employee = Principal("employee-a", "tenant-a", "employee-a", frozenset({"employee"}))
 
-    customer_route = asyncio.run(classifier.route(customer, "给我看内部成本和毛利"))
+    with pytest.raises(RouteError, match="no_agent_permission"):
+        asyncio.run(classifier.route(customer, "给我看内部成本和毛利"))
     employee_route = asyncio.run(classifier.route(employee, "这款产品怎么使用？"))
 
-    assert customer_route.agent == AgentRoute.CUSTOMER_PRODUCT_CONSULTATION
     assert employee_route.agent == AgentRoute.INTERNAL_QUOTE_REPLY
-    assert customer_route.source == employee_route.source == "rbac_single_route"
+    assert employee_route.source == "rbac_single_route"
     assert provider.calls == []
 
 
@@ -161,13 +161,10 @@ def test_gateway_dispatches_by_trusted_account_role_only():
 
     created, replies, calls = asyncio.run(scenario())
     assert {selected for _, selected in created} == {
-        AgentRoute.CUSTOMER_PRODUCT_CONSULTATION.value,
         AgentRoute.INTERNAL_QUOTE_REPLY.value,
     }
-    assert {reply.content for reply in replies} == {
-        AgentRoute.CUSTOMER_PRODUCT_CONSULTATION.value,
-        AgentRoute.INTERNAL_QUOTE_REPLY.value,
-    }
+    assert any(reply.content == AgentRoute.INTERNAL_QUOTE_REPLY.value for reply in replies)
+    assert any(reply.error_code == "no_agent_permission" for reply in replies)
     assert calls == []
 
 

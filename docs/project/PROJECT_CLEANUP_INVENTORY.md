@@ -11,6 +11,12 @@
 
 ## 执行记录
 
+- 2026-10-15：再次清理可重建内容和已核实的重复项，共删除 3,109 个文件，
+  释放约 281 MiB。范围包括 `.uv-cache/`、`.pytest_cache/`、项目源码字节码、
+  旧运行日志、JetBrains 本地配置、空的 `.agents/`、未被当前 OCR 配置引用的
+  `PP-OCRv5_server_det` 与 `PP-OCRv5_server_rec`、无引用的 `portal.css`，以及
+  知识库回收站中与当前已发布文档 SHA-256 完全相同的两个 PDF 副本。保留
+  `.venv/`、三个当前 OCR 模型、有效知识库、业务数据库、会话、审批和演示数据。
 - 2026-08-27：A 类已执行清理，包括 `.pytest_cache/`、`.tmp/`、`.uv-cache/`、
   `workspace/browser-acceptance/`、项目源码中的 `__pycache__/`、`botpy.log*`、
   `workspace/runtime/*.log` 和 `workspace/browser-check.*.log`。

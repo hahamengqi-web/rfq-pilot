@@ -78,11 +78,11 @@ class WebFileImportTests(unittest.TestCase):
         self.assertIn('id="emailRuntimeStatus"', page.text)
         self.assertEqual(404, self.client.get("/ops").status_code)
         self.assertNotIn("/api/ops/dashboard", script)
-        self.assertIn("/api/email/metrics", script)
-        self.assertIn('id="customerPortalLink"', page.text)
-        self.assertIn("/api/ui/config", script)
+        self.assertIn("/api/email/workflow", script)
+        self.assertNotIn('id="customerPortalLink"', page.text)
+        self.assertIn('href="/inquiries"', page.text)
 
-    def test_workspace_exposes_the_dedicated_customer_portal_url(self):
+    def test_workspace_links_to_the_dedicated_customer_portal(self):
         response = self.client.get("/api/ui/config")
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.json()["customer_portal_enabled"])
@@ -99,49 +99,17 @@ class WebFileImportTests(unittest.TestCase):
         self.assertNotIn('id="emailView"', landing.text)
         self.assertIn('id="emailView"', workspace.text)
 
-    def test_customer_visual_preview_is_available_without_business_actions(self):
-        customer = self.client.get("/customer")
-        stylesheets = [
-            self.client.get("/static/css/tokens.css"),
-            self.client.get("/static/css/common.css"),
-            self.client.get("/static/css/customer.css"),
-        ]
-        theme_script = self.client.get("/static/js/theme.js")
-        script = self.client.get("/static/customer-preview.js")
-        self.assertEqual(200, customer.status_code)
-        self.assertTrue(all(stylesheet.status_code == 200 for stylesheet in stylesheets))
-        self.assertEqual(200, theme_script.status_code)
-        self.assertEqual(200, script.status_code)
-        self.assertNotIn("接口适配未配置", customer.text)
-        self.assertNotIn("预览模式", customer.text)
-        self.assertIn('data-section="rates"', customer.text)
-        self.assertIn('id="contactPage"', customer.text)
-        self.assertIn('data-theme-storage="nanoclaw-customer-theme"', customer.text)
-        self.assertIn('/static/css/customer.css', customer.text)
-        self.assertNotIn("/ws/customer", customer.text)
-        self.assertNotIn("/api/ops/", customer.text)
+    def test_customer_portal_returns_gone(self):
+        response = self.client.get("/customer")
+        self.assertEqual(410, response.status_code)
+        self.assertEqual("customer_agent_removed", response.json()["detail"])
 
-    def test_customer_portal_layout_has_constrained_responsive_columns(self):
-        page = self.client.get("/customer")
-        styles = self.client.get("/static/css/customer.css").text
-        script = self.client.get("/static/customer-preview.js").text
-        layout_script = self.client.get("/static/customer-layout-fix.js").text
-        self.assertIn("customer-shell", page.text)
-        self.assertIn("customer-sidebar", page.text)
-        self.assertIn("min-width:0", styles)
-        self.assertIn("max-width:820px", styles)
-        self.assertIn("overflow-wrap:anywhere", styles)
-        self.assertIn(".customer-conversation{display:grid;width:100%", styles)
-        self.assertIn(".customer-main{width:100%;max-width:none;margin:0;padding:0", styles)
-        self.assertIn("[data-theme=dark]", styles)
-        self.assertIn("--customer-bg:#0d1b28", styles)
-        self.assertIn("nanoclaw-customer-language", script)
-        self.assertIn(".customer-shell.rail-expanded", styles)
-        self.assertIn(".customer-shell.sidebar-collapsed", styles)
-        self.assertIn(".customer-nav span{display:grid;width:24px", styles)
-        self.assertIn(".customer-brand small,.customer-nav b{display:none}", styles)
-        self.assertIn("nanoclaw-customer-rail-expanded", layout_script)
-        self.assertIn("nanoclaw-customer-sidebar-collapsed", layout_script)
+    def test_inquiry_workbench_is_served_with_responsive_styles(self):
+        page = self.client.get("/inquiries")
+        self.assertEqual(200, page.status_code)
+        self.assertIn('/static/inquiries.js', page.text)
+        self.assertIn('id="wa-import"', page.text)
+        self.assertIn('@media(max-width:800px)', self.client.get('/static/inquiries.css').text)
 
     def test_read_file_returns_text_without_persisting_to_knowledge_base(self):
         response = self.client.post(

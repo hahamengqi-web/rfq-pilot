@@ -91,6 +91,9 @@ class EmailDeliveryService:
         }
 
     def queue(self, payload: dict, *, actor: str = "email_admin") -> dict:
+        from agent.inquiry.config import InquirySettings
+        if InquirySettings.from_env().enabled:
+            raise EmailDeliveryServiceError("inquiry_workflow_required", 409)
         if not isinstance(payload, dict):
             raise EmailDeliveryServiceError("email_invalid_delivery_request")
         allowed = {"account_id", "quote_id", "quote_version", "approval_key", "recipient", "max_attempts"}

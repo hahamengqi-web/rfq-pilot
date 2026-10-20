@@ -42,11 +42,17 @@ def check() -> dict:
         cursor.execute("""SELECT table_name FROM information_schema.tables
           WHERE table_schema=DATABASE() AND table_name IN
           ('ops_email_account','ops_email_account_audit','ops_email_delivery','ops_email_delivery_audit')""")
-        actual = {row["table_name"] for row in cursor.fetchall()}
+        actual = {
+            next((value for key, value in row.items() if str(key).casefold() == "table_name"), "")
+            for row in cursor.fetchall()
+        }
         required = {"ops_email_account", "ops_email_account_audit", "ops_email_delivery", "ops_email_delivery_audit"}
         cursor.execute("""SELECT column_name FROM information_schema.columns
           WHERE table_schema=DATABASE() AND table_name='ops_email_delivery'""")
-        columns = {row["column_name"] for row in cursor.fetchall()}
+        columns = {
+            next((value for key, value in row.items() if str(key).casefold() == "column_name"), "")
+            for row in cursor.fetchall()
+        }
         required_columns = {"idempotency_key", "lease_owner", "lease_until", "snapshot_hash", "content_redacted_at"}
         return {
             "database": load_business_config().mysql_database,

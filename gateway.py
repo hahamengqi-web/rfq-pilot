@@ -278,6 +278,12 @@ class Gateway:
                 if hasattr(agent, "set_request_context"):
                     trusted_context = {"channel": inbound_msg.channel,
                                        "language": raw.get("language", "en")}
+                    if inbound_msg.channel == "customer_portal":
+                        trusted_context.update({
+                            key: raw[key] for key in (
+                                "conversation_id", "request_id", "customer_id",
+                            ) if key in raw
+                        })
                     if selected_agent is not None:
                         # Forward only the Principal that was decoded and accepted above.
                         # Never copy a model/user supplied identity into an Agent tool context.
@@ -297,19 +303,28 @@ class Gateway:
                                 "tenant_id": raw["tenant_id"],
                                 "account_id": raw["account_id"],
                             })
-                        trusted_context.update({
-                            key: raw[key] for key in ("conversation_id", "request_id")
-                            if key in raw
-                        })
+                    if inbound_msg.channel == "customer_portal":
+                        async def publish_progress(stage: str) -> None:
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=inbound_msg.channel, chat_id=inbound_msg.chat_id,
+                                content="", conversation_id=conversation_id,
+                                request_id=request_id, event_type="assistant.progress",
+                                metadata={"stage": str(stage)[:40]},
+                            ))
+                        trusted_context["_progress_callback"] = publish_progress
                     agent.set_request_context(trusted_context)
                 response = await agent.run(inbound_msg.content)
+                response_metadata = (
+                    agent.consume_response_metadata()
+                    if hasattr(agent, "consume_response_metadata") else {}
+                )
                 if scope is not None and not await self.coordinator.complete(
                         scope, self.worker_id):
                     raise RuntimeError("request claim lost before completion")
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=inbound_msg.channel, chat_id=inbound_msg.chat_id,
                     content=response, conversation_id=conversation_id,
-                    request_id=request_id,
+                    request_id=request_id, metadata=response_metadata,
                 ))
         except asyncio.CancelledError:
             if claimed and scope is not None:

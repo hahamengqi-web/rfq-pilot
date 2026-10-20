@@ -13,7 +13,9 @@ def test_root_compose_is_a_safe_single_command_application_stack():
     assert app["build"]["dockerfile"] == "Dockerfile"
     assert app["restart"] == "unless-stopped"
     assert app["environment"]["NANOCLAW_WEB_HOST"] == "0.0.0.0"
-    assert app["environment"]["NANOCLAW_CUSTOMER_PORTAL_HOST"] == "0.0.0.0"
+    assert "NANOCLAW_CUSTOMER_PORTAL_HOST" not in app["environment"]
+    assert "NANOCLAW_CUSTOMER_PORTAL_PUBLIC_PORT" not in "\n".join(app["ports"])
+    assert app["environment"]["DUE_DILIGENCE_REDIS_URL"] == "redis://redis:6379/3"
     assert all("127.0.0.1" in published for published in app["ports"])
     assert app["volumes"] == [
         "nanoclaw_workspace:/app/workspace",

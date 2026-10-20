@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="NanoClaw intelligent foreign trade workspace">
   <title>NanoClaw</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260827-approval-actions-1">
+  <link rel="stylesheet" href="/static/app.css?v=20261017-email-workflow">
   <link rel="stylesheet" href="/static/css/markdown.css">
   <link rel="stylesheet" href="/static/import.css">
 </head>
@@ -26,6 +26,7 @@
     <aside class="rail" aria-label="Primary navigation">
       <div class="brand" aria-label="NanoClaw"><span class="brand-mark">N</span></div>
       <nav class="rail-nav">
+        <a class="rail-button rail-link" href="/inquiries" aria-label="询盘工作台"><span>单</span><span class="rail-label">询盘工作台</span></a>
         <button class="rail-button active" data-view="chat" data-i18n-title="nav.chat" aria-label="Chat">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4z"/></svg>
           <span class="rail-label" data-i18n="nav.chat">对话</span>
@@ -42,7 +43,6 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z"/><path d="m3 7 9 7 9-7"/></svg>
           <span class="rail-label" data-i18n="nav.email">邮箱</span>
         </button>
-        <a id="customerPortalLink" class="rail-button rail-link" href="http://127.0.0.1:8766/" target="_blank" rel="noopener" data-i18n-title="nav.customer" aria-label="Customer portal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg><span class="rail-label" data-i18n="nav.customer">客户门户</span></a>
       </nav>
       <div class="rail-bottom">
         <button id="railToggle" class="rail-button" data-i18n-title="nav.expand" aria-label="Expand navigation"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg><span class="rail-label" data-i18n="nav.expand">展开菜单</span></button>
@@ -172,20 +172,21 @@
       <section id="emailView" class="view email-view" aria-labelledby="emailTitle">
         <header class="stage-header">
           <button class="icon-button mobile-only mobile-menu-clone" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-          <div class="title-block"><h2 id="emailTitle" data-i18n="email.title">邮箱</h2><p data-i18n="email.subtitle">QQ 与网易邮箱账户、审核和受控投递</p></div>
+          <div class="title-block"><h2 id="emailTitle" data-i18n="email.title">邮箱</h2><p>管理收件账户；来信进入询盘工作流后由人工审核并回复</p></div>
           <span id="emailApiStatus" class="email-api-status ready">本机工作空间</span>
         </header>
         <div class="email-content">
-          <div class="email-boundary" role="status"><strong data-i18n="email.m2Title">邮箱工作区</strong><span id="emailBoundaryText">Agent 自动审核 RFQ 字段；本机工作空间可直接查看邮件记录和受控投递状态。</span></div>
+          <div class="email-boundary" role="status"><strong>邮箱与询盘</strong><span id="emailBoundaryText">账户设置在此管理；来信、背调、报价审批和回复记录在询盘工作台查看。</span></div>
           <div class="email-overview">
-            <section class="email-overview-card"><h3 data-i18n="ops.metrics">今日运行指标</h3><div class="email-overview-metrics"><p><span data-i18n="ops.pendingReviews">待审核邮件</span><b id="emailMetricPending">—</b></p><p><span data-i18n="ops.sendableApprovals">可发送审批</span><b id="emailMetricSendable">—</b></p><p><span data-i18n="ops.activeDeliveries">投递处理中</span><b id="emailMetricActive">—</b></p><p><span data-i18n="ops.acceptedToday">今日 SMTP 接受</span><b id="emailMetricAccepted">—</b></p></div></section>
-            <section class="email-overview-card"><h3 data-i18n="ops.mailbox">邮箱工作台</h3><p id="emailRuntimeStatus" class="email-overview-status" data-i18n="ops.disabled">M3 收件审核已启用</p><div id="emailRuntimeHint" class="email-overview-hint">正在读取收件与投递运行状态。</div></section>
+            <section class="email-overview-card"><h3>当前询盘邮件</h3><div class="email-overview-metrics"><p><span>邮件记录</span><b id="emailMetricPending">—</b></p><p><span>待人工处理</span><b id="emailMetricSendable">—</b></p><p><span>发送中</span><b id="emailMetricActive">—</b></p><p><span>等待客户回复</span><b id="emailMetricAccepted">—</b></p></div></section>
+            <section class="email-overview-card"><h3>运行状态</h3><p id="emailRuntimeStatus" class="email-overview-status">正在读取配置</p><div id="emailRuntimeHint" class="email-overview-hint">正在读取收件与发送设置。</div></section>
           </div>
           <div class="email-tabs" role="tablist" aria-label="Email workspace">
             <button type="button" class="active" data-email-tab="accounts" role="tab" aria-selected="true" data-i18n="email.tabAccounts">账户配置</button>
-            <button type="button" data-email-tab="inbound" role="tab" aria-selected="false">邮件记录</button>
-            <button type="button" data-email-tab="sendable" role="tab" aria-selected="false" data-i18n="email.tabSendable">待发送</button>
-            <button type="button" data-email-tab="deliveries" role="tab" aria-selected="false" data-i18n="email.tabDeliveries">投递记录</button>
+            <button type="button" data-email-tab="workflow" role="tab" aria-selected="false">来信与回复</button>
+            <button type="button" data-email-tab="inbound" role="tab" aria-selected="false" hidden>旧邮件记录</button>
+            <button type="button" data-email-tab="sendable" role="tab" aria-selected="false" hidden>旧待发送</button>
+            <button type="button" data-email-tab="deliveries" role="tab" aria-selected="false" hidden>旧投递记录</button>
           </div>
           <section id="emailAccountsPanel" class="email-tab-panel active" data-email-panel="accounts" role="tabpanel">
             <aside class="email-account-sidebar">
@@ -209,11 +210,15 @@
               </div>
               <div class="email-switches">
                 <label><input id="emailInboundEnabled" type="checkbox" checked><span><strong data-i18n="email.inboundEnabled">启用只读收件</strong><small data-i18n="email.inboundHint">使用 BODY.PEEK[]，不标记已读。</small></span></label>
-                <label><input id="emailOutboundEnabled" type="checkbox"><span><strong data-i18n="email.outboundEnabled">启用受控发件</strong><small data-i18n="email.outboundHint">M4 完成前不会发送邮件。</small></span></label>
+                <label><input id="emailOutboundEnabled" type="checkbox"><span><strong data-i18n="email.outboundEnabled">启用受控发件</strong><small>还需开启服务端 SMTP，并通过人工审批与收件人白名单。</small></span></label>
               </div>
               <div id="emailServerSummary" class="email-server-summary" aria-live="polite"></div>
               <div class="email-form-actions"><button id="emailToggleAccount" type="button" class="secondary-button" hidden data-i18n="email.enable">启用账户</button><button id="emailTestConnection" type="button" class="secondary-button" data-i18n="email.testConnection">测试连接</button><button id="emailSaveAccount" type="submit" class="email-primary-button" data-i18n="email.save">保存配置</button></div>
             </form>
+          </section>
+          <section class="email-tab-panel email-workflow-panel" data-email-panel="workflow" role="tabpanel" hidden>
+            <div class="email-workflow-head"><div><h3>来信与回复</h3><p>显示当前询盘中的邮件。此前的邮件记录已保留归档。</p></div><div><button id="emailWorkflowRefresh" type="button" class="secondary-button">刷新</button><a class="email-primary-button" href="/inquiries">打开询盘工作台</a></div></div>
+            <div id="emailWorkflowList" class="email-workflow-list" aria-live="polite"></div>
           </section>
           <section class="email-tab-panel email-review-panel" data-email-panel="inbound" role="tabpanel" hidden>
             <div class="email-review-toolbar">
@@ -246,6 +251,6 @@
   </dialog>
   <div id="mobileBackdrop" class="mobile-backdrop"></div>
   <script src="/static/js/markdown.js" defer></script>
-  <script src="/static/app.js?v=20260827-approval-actions-2" defer></script>
+  <script src="/static/app.js?v=20261017-email-workflow-4" defer></script>
 </body>
 </html>

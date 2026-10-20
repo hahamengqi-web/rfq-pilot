@@ -88,6 +88,27 @@ def test_missing_fields_wait_failure_error_code_and_cancel(tmp_path: Path):
     assert latest.last_error_code == "tool_result_invalid"
 
 
+def test_latest_run_uses_append_order_when_timestamps_tie(tmp_path: Path):
+    service = WorkflowService(tmp_path)
+    conversation_id = "59c50f2b-3c09-4af9-95e3-c1ba305ff123"
+    key = f"web:local:{conversation_id}"
+    asyncio.run(service.observe_tool(key, "extract_rfq", "{}"))
+    first = service.list_runs(conversation_id)[0]
+    asyncio.run(service.observe_tool(key, "extract_rfq", json.dumps({
+        "error": "private stack", "error_code": "extract_failed"
+    })))
+    second = service.list_runs(conversation_id)[0]
+
+    with service._lock:
+        runs = service._read_runs()
+        for run in runs:
+            run.updated_at = "2026-10-19T00:00:00Z"
+        service._write_runs(runs)
+
+    assert first.run_id != second.run_id
+    assert service.list_runs(conversation_id)[0].run_id == second.run_id
+
+
 def build_web(tmp_path: Path):
     conversation_service = ConversationService(tmp_path / "sessions")
     workflow_service = WorkflowService(tmp_path / "workflows")

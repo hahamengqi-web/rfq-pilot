@@ -72,8 +72,7 @@ class RagApiConfigTests(unittest.TestCase):
         with patch("trade_rag.config._PROJECT_ENV", Path("missing.env")), patch.dict(
             os.environ, {"RAG_VECTOR_BACKEND": "memory", "RAG_VECTOR_DIMENSIONS": "1024"}, clear=True,
         ):
-            with self.assertRaisesRegex(ValueError, "requires RAG_VECTOR_DIMENSIONS=64"):
-                load_rag_vector_config()
+            self.assertEqual(load_rag_vector_config().dimensions, 1024)
 
     def test_sqlite_vector_and_keyword_config_share_a_persistent_path(self):
         values = {

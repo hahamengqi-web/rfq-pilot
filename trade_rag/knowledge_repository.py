@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import html
+import io
+import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import inspect
 import json
 import os
 import re
@@ -13,7 +17,10 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .chunking import PDF_SPLITTER_VERSION, ParentChildSplitter, PdfAwareParentChildSplitter
+import pdfplumber
+
+from .chunking import (PDF_SPLITTER_VERSION, PARENT_SPLITTER_VERSION,
+                       ParentChildSplitter, PdfAwareParentChildSplitter)
 from .config import OcrConfig, PdfIngestionConfig, load_ocr_config, load_pdf_ingestion_config
 from .contracts import (
     CanonicalDocument,
@@ -31,7 +38,7 @@ from .contracts import (
 )
 from .loaders import ApprovalWorkflow, DocumentLoader, _strip_html
 from .parsers import PdfProcessingError, parse_document_bytes
-from .ocr import (PaddleOcrProvider, OcrOutput, OcrProcessingError,
+from .ocr import (OcrOutput, OcrProcessingError, create_ocr_provider,
                   SUPPORTED_IMAGE_TYPES, extract_pdf_images, make_image_artifact,
                   validate_image_bytes)
 
@@ -50,6 +57,93 @@ SUPPORTED_TEXT_TYPES = {
     ".json": "application/json",
     ".csv": "text/csv",
 }
+
+_PRODUCT_MODEL_PATTERNS = (
+    re.compile(r"\bArcher\s+[A-Z0-9][A-Z0-9-]{1,24}\b", re.IGNORECASE),
+    re.compile(r"\bDeco\s+[A-Z0-9][A-Z0-9-]{1,24}\b", re.IGNORECASE),
+    re.compile(r"\bOmada\s+[A-Z0-9][A-Z0-9-]{1,24}\b", re.IGNORECASE),
+    re.compile(r"\bTL-[A-Z0-9][A-Z0-9-]{2,30}(?=$|[^A-Z0-9-])", re.IGNORECASE),
+)
+_DOCUMENT_VERSION = re.compile(r"(?<!\d)(\d+\.\d+(?:\.\d+)?)(?!\d)")
+
+
+def _index_failure_code(exc: Exception) -> str:
+    """Return a safe, actionable index error code for the workbench.
+
+    Backend exceptions can include connection details or provider responses, so
+    they must not be copied into document metadata.  Keep the original error
+    for the server log while persisting a small stable code that tells an
+    operator which part needs attention.
+    """
+    message = str(exc).strip()
+    if message == "knowledge_index_count_mismatch":
+        return message
+    if message in {"knowledge_pdf_chunks_missing", "knowledge_parsed_artifact_missing"}:
+        return "knowledge_index_source_missing"
+    if isinstance(exc, TimeoutError):
+        return "knowledge_index_timeout"
+    if isinstance(exc, ConnectionError):
+        return "knowledge_index_backend_unavailable"
+    return "knowledge_index_runtime_error"
+
+
+def _infer_document_type(title: str) -> str:
+    # Vendor download names often use underscores: "Archer_AX55_UG".
+    # Normalize separators before classifying so a User Guide does not become
+    # generic product information at the moment it is staged.
+    value = re.sub(r"[_\-.]+", " ", title.casefold())
+    if any(term in value for term in (
+        "maintenance", "service manual", "repair manual", "售后", "维修",
+        "维护", "检修", "故障排除", "troubleshooting",
+    )):
+        return "maintenance_manual"
+    if any(term in value for term in (
+        "manual", "user guide", "installation guide", " ug ", "用户手册", "使用手册",
+        "安装手册", "配置手册", "操作手册", "说明书",
+    )):
+        return "product_manual"
+    if any(term in value for term in ("warranty", "保修")):
+        return "warranty_policy"
+    if "faq" in value or "常见问题" in value:
+        return "faq"
+    return "product_info"
+
+
+def _infer_product_models(title: str, content: str = "") -> list[str]:
+    # Title matches are authoritative. For generic manual titles, use frequency
+    # across the full parsed artifact so one-off example devices do not dominate.
+    title_matches: list[str] = []
+    normalized_title = re.sub(r"[_\-.]+", " ", title)
+    for pattern in _PRODUCT_MODEL_PATTERNS:
+        for match in pattern.finditer(normalized_title):
+            value = re.sub(r"\s+", " ", match.group(0)).strip()
+            if value.casefold() not in {row.casefold() for row in title_matches}:
+                title_matches.append(value)
+    if title_matches:
+        return title_matches[:6]
+    counts: dict[str, tuple[str, int, int]] = {}
+    for pattern in _PRODUCT_MODEL_PATTERNS:
+        for match in pattern.finditer(content):
+            value = re.sub(r"\s+", " ", match.group(0)).strip()
+            key = value.casefold()
+            display, count, first = counts.get(key, (value, 0, match.start()))
+            counts[key] = (display, count + 1, min(first, match.start()))
+    ranked = sorted(counts.values(), key=lambda row: (-row[1], row[2], row[0].casefold()))
+    strongest = ranked[0][1] if ranked else 0
+    repeated = [display for display, count, _ in ranked
+                if count >= 2 and count >= max(2, strongest * 0.4)]
+    return (repeated or [display for display, _, _ in ranked])[:6]
+
+
+def _infer_version_label(title: str) -> str:
+    matches = _DOCUMENT_VERSION.findall(title)
+    return matches[-1] if matches else "1"
+
+
+def _logical_document_key(title: str) -> str:
+    stem = _DOCUMENT_VERSION.sub("", title).casefold()
+    normalized = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "-", stem).strip("-")
+    return normalized[:120] or hashlib.sha256(title.encode("utf-8")).hexdigest()[:24]
 PRIVATE_RECORD_FIELDS = {"stored_name", "source_stored_name", "parsed_stored_name", "parsed_hash"}
 
 
@@ -93,6 +187,21 @@ def decode_text_document(filename: str, payload: bytes, *, max_bytes: int) -> tu
             raise ValueError("invalid_json") from exc
     if suffix in {".html", ".htm"}:
         text = _strip_html(html.unescape(text))
+    if suffix == ".csv":
+        try:
+            rows = [row for row in csv.reader(io.StringIO(text)) if any(cell.strip() for cell in row)]
+        except csv.Error as exc:
+            raise ValueError("invalid_csv") from exc
+        if not rows:
+            raise ValueError("empty_file")
+        width = max(len(row) for row in rows)
+        def markdown_row(row: list[str]) -> str:
+            cells = [cell.strip().replace("|", "\\|").replace("\r", " ")
+                     .replace("\n", "<br>") for cell in row]
+            return "| " + " | ".join(cells + [""] * (width - len(cells))) + " |"
+        text = "\n".join([markdown_row(rows[0]),
+                          "| " + " | ".join(["---"] * width) + " |",
+                          *(markdown_row(row) for row in rows[1:])])
     if not text.strip():
         raise ValueError("empty_file")
     return name, text, SUPPORTED_TEXT_TYPES[suffix]
@@ -272,7 +381,7 @@ class KnowledgeRepository:
         self.max_text_bytes = max_bytes
         self.pdf_config = pdf_config or load_pdf_ingestion_config()
         self.ocr_config = ocr_config or load_ocr_config()
-        self.ocr_provider = ocr_provider or PaddleOcrProvider(self.ocr_config)
+        self.ocr_provider = ocr_provider or create_ocr_provider(self.ocr_config)
         self.max_bytes = max(max_bytes, self.pdf_config.max_bytes, self.ocr_config.max_image_bytes)
         self.loader = DocumentLoader()
         self.splitter = ParentChildSplitter()
@@ -374,16 +483,28 @@ class KnowledgeRepository:
         path = self._source_path(item)
         if not path.is_file():
             raise FileNotFoundError("knowledge_source_missing")
-        document = self.loader.load(
-            path,
-            document_id=str(item["document_id"]),
-            version=int(item.get("version", 1)),
+        _, content, content_type = decode_text_document(
+            str(item.get("original_name") or path.name), path.read_bytes(),
+            max_bytes=self.max_text_bytes,
+        )
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if content_hash != item.get("content_hash"):
+            raise RuntimeError("knowledge_content_integrity_failed")
+        return CanonicalDocument(
+            document_id=str(item["document_id"]), version=int(item.get("version", 1)),
+            source_uri=f"knowledge://{item['document_id']}",
+            title=str(item.get("title") or item["document_id"]),
+            content=content, content_hash=content_hash, content_type=content_type,
+            location="page:1", language=(
+                "zh" if any("\u4e00" <= char <= "\u9fff" for char in content) else "en"
+            ),
             business_unit_id=str(item.get("business_unit_id", "default")),
             allowed_roles=frozenset(str(role) for role in item.get("allowed_roles", [])),
+            classification=str(item.get("classification", "internal")),
+            status=DocumentStatus.PUBLISHED,
+            parser_version=str(item.get("parser_version") or "stdlib-1"),
+            metadata={"source_hash": str(item.get("source_hash", ""))},
         )
-        self.workflow.transition(document, DocumentStatus.APPROVED)
-        self.workflow.transition(document, DocumentStatus.PUBLISHED)
-        return replace(document, classification=str(item.get("classification", "internal")))
 
     def _load_pdf_document(self, item: dict, result: ParseResult, *,
                            reviewed_complex_layout: bool = False) -> CanonicalDocument:
@@ -414,6 +535,11 @@ class KnowledgeRepository:
                 "pages": result.pages,
                 "parser": result.parser,
                 "splitter_version": PDF_SPLITTER_VERSION,
+                "document_type": str(item.get("document_type") or "product_document"),
+                "document_version": str(item.get("document_version") or "1"),
+                "logical_document_key": str(item.get("logical_document_key") or ""),
+                "product_models": list(item.get("product_models") or
+                                       _infer_product_models(str(item.get("title", "")), result.content)),
                 "images": [_image_public_payload(image) for image in result.images],
             },
         )
@@ -438,7 +564,7 @@ class KnowledgeRepository:
             "indexed_count": None,
             "parent_count": None,
             "child_count": None,
-            "splitter_version": "parent-child-v1",
+            "splitter_version": PARENT_SPLITTER_VERSION,
             "parser": "stdlib",
             "parser_version": "stdlib-1",
             "pages": None,
@@ -460,9 +586,17 @@ class KnowledgeRepository:
             "deleted_at": None,
             "last_error_code": None,
             "classification": "internal",
+            "document_type": _infer_document_type(str(item.get("title") or item.get("original_name") or "")),
+            "document_version": _infer_version_label(str(item.get("title") or item.get("original_name") or "")),
+            "logical_document_key": _logical_document_key(str(item.get("title") or item.get("original_name") or item.get("document_id") or "document")),
+            "product_models": _infer_product_models(str(item.get("title") or item.get("original_name") or "")),
+            "supersedes_document_id": None,
             "processing_attempt_count": 0,
             "processing_started_at": None,
             "processing_completed_at": None,
+            "index_progress_stage": None,
+            "index_progress_completed": 0,
+            "index_progress_total": 0,
         }
         for key, value in defaults.items():
             if key not in item:
@@ -555,6 +689,10 @@ class KnowledgeRepository:
                                 last_error_code="knowledge_content_integrity_failed", updated_at=now)
                     item["schema_version"] = MANIFEST_SCHEMA
                     return True
+                # Legacy rows have no canonical content hash yet. The loader
+                # verifies that hash, so set it before reconstructing chunks.
+                item["content_hash"] = content_hash
+                item["content_type"] = content_type
                 document = self._load_entry_document(item)
                 parents, children = self.splitter.split(document)
                 updates = {
@@ -603,7 +741,7 @@ class KnowledgeRepository:
                 shutil.copy2(self.manifest_path, backup)
         try:
             self._write_manifest(manifest)
-        except Exception:
+        except Exception as exc:
             if backup is not None and backup.is_file():
                 shutil.copy2(backup, self.manifest_path)
             raise
@@ -641,13 +779,22 @@ class KnowledgeRepository:
             generation_suffix = f"-v{generation}" if generation > 1 else ""
             document_id = f"web-{source_hash[:24]}{generation_suffix}"
             safe_stem = self._safe_stem(name)
+            logical_key = _logical_document_key(Path(name).stem)
+            logical_matches = [row for row in manifest["documents"]
+                               if row.get("logical_document_key") == logical_key
+                               and row.get("status") != "revoked"]
+            document_generation = max(
+                (int(row.get("version") or 1) for row in logical_matches), default=0,
+            ) + 1
+            superseded = max(logical_matches, key=lambda row: int(row.get("version") or 1),
+                             default=None)
             stored_name = f"{safe_stem[:60]}-{source_hash[:12]}{generation_suffix}.pdf"
             parsed_name = f"{safe_stem[:60]}-{source_hash[:12]}{generation_suffix}.parsed.json"
             now = self._now()
             entry = {
                 "schema_version": MANIFEST_SCHEMA,
                 "document_id": document_id,
-                "version": 1,
+                "version": document_generation,
                 "title": Path(name).stem,
                 "original_name": name,
                 "stored_name": stored_name,
@@ -660,6 +807,12 @@ class KnowledgeRepository:
                 "business_unit_id": "default",
                 "allowed_roles": [],
                 "classification": classification,
+                "document_type": _infer_document_type(Path(name).stem),
+                "document_version": _infer_version_label(Path(name).stem),
+                "logical_document_key": logical_key,
+                "product_models": _infer_product_models(Path(name).stem),
+                "supersedes_document_id": (superseded.get("document_id")
+                                             if superseded is not None else None),
                 "status": "draft",
                 "size_bytes": len(payload),
                 "parse_status": "pending",
@@ -688,6 +841,9 @@ class KnowledgeRepository:
                 "processing_attempt_count": 0,
                 "processing_started_at": None,
                 "processing_completed_at": None,
+                "index_progress_stage": None,
+                "index_progress_completed": 0,
+                "index_progress_total": 0,
                 "created_at": now,
                 "updated_at": now,
                 "deleted_at": None,
@@ -809,6 +965,20 @@ class KnowledgeRepository:
                         images=[_image_public_payload(image) for image in result.images],
                         parse_warnings=[warning.value for warning in result.warnings],
                         ingestion_route=result.route.value,
+                        document_type=(
+                            _infer_document_type(str(item.get("title", "")))
+                            if (str(item.get("metadata_source") or "") != "operator"
+                                and str(item.get("document_type") or "") == "product_info"
+                                and _infer_document_type(str(item.get("title", ""))) != "product_info")
+                            else str(item.get("document_type") or
+                                     _infer_document_type(str(item.get("title", ""))))
+                        ),
+                        document_version=str(item.get("document_version") or
+                                             _infer_version_label(str(item.get("title", "")))),
+                        logical_document_key=str(item.get("logical_document_key") or
+                                                 _logical_document_key(str(item.get("title", "")))),
+                        product_models=(list(item.get("product_models") or ()) or
+                                        _infer_product_models(str(item.get("title", "")), result.content)),
                         review_type=(
                             "ocr_low_confidence"
                             if PdfWarningCode.OCR_LOW_CONFIDENCE in result.warnings
@@ -835,7 +1005,14 @@ class KnowledgeRepository:
                 } else PdfErrorCode.PARSE_FAILED.value
                 return self._mark_pdf_processing_failure(document_id, stage="parse", error_code=code)
 
-        if not result.indexable:
+        # A reviewed PDF keeps the parser's original REVIEW_REQUIRED route in
+        # its durable artifact.  The manifest is the authoritative record of
+        # the later approval, so rechunking must continue without rerunning OCR.
+        approved_for_index = (
+            snapshot.get("ingestion_route") == "index"
+            and bool(snapshot.get("review_approved_at"))
+        )
+        if not result.indexable and not approved_for_index:
             return snapshot
         if snapshot.get("chunk_status") == "ready":
             return snapshot
@@ -851,8 +1028,12 @@ class KnowledgeRepository:
                 item.update(chunk_status="running", updated_at=self._now())
                 self._write_manifest(manifest)
                 snapshot = dict(item)
-            document = self._load_pdf_document(snapshot, result)
-            parents, children = self.pdf_splitter.split(document, result)
+            document = self._load_pdf_document(
+                snapshot, result, reviewed_complex_layout=approved_for_index,
+            )
+            parents, children = self.pdf_splitter.split(
+                document, result, reviewed_complex_layout=approved_for_index,
+            )
             if not parents or not children:
                 raise RuntimeError("knowledge_chunks_empty")
             with self._lock:
@@ -913,6 +1094,48 @@ class KnowledgeRepository:
             self._write_manifest(manifest)
             return dict(item)
 
+    def prepare_pdf_rechunk(self, document_id: str) -> dict:
+        """Rebuild chunks from the durable parsed artifact without rerunning OCR."""
+        result = self.load_parsed_result(document_id)
+        with self._lock:
+            manifest = self._read_upgraded_manifest()
+            item = self._select_document_entry(manifest, document_id)
+            if item is None:
+                raise KeyError("knowledge_document_not_found")
+            if (item.get("content_type") != "application/pdf"
+                    or item.get("status") in {"revoked", "revoke_pending"}
+                    or item.get("parse_status") != "ready"):
+                raise ValueError("knowledge_rechunk_not_allowed")
+            item.update(
+                status="draft", chunk_status="pending", index_status="pending",
+                parent_count=None, child_count=None, indexed_count=0,
+                splitter_version="pdf-aware-pending", last_error_code=None,
+                index_progress_stage="chunk", index_progress_completed=0,
+                index_progress_total=0, processing_completed_at=None,
+                updated_at=self._now(),
+            )
+            if not item.get("product_models"):
+                item["product_models"] = _infer_product_models(
+                    str(item.get("title", "")), result.content,
+                )
+            self._write_manifest(manifest)
+            return dict(item)
+
+    def _record_index_progress(self, document_id: str, stage: str,
+                               completed: int, total: int) -> None:
+        with self._lock:
+            manifest = self._read_upgraded_manifest()
+            item = self._select_document_entry(manifest, document_id)
+            if item is None or item.get("status") in {"revoked", "revoke_pending"}:
+                return
+            item.update(
+                index_progress_stage=str(stage),
+                index_progress_completed=max(0, int(completed)),
+                index_progress_total=max(0, int(total)),
+                updated_at=self._now(),
+            )
+            self._write_manifest(manifest)
+
     def list_pdf_processing_candidates(self) -> list[str]:
         """Return only unfinished jobs; terminal failures require an explicit retry."""
         with self._lock:
@@ -926,6 +1149,14 @@ class KnowledgeRepository:
                 and (item.get("parse_status") in {"pending", "running"}
                      or item.get("chunk_status") in {"pending", "running"}
                      or item.get("index_status") in {"pending", "running"})]
+
+    def list_pdf_auto_review_candidates(self) -> list[str]:
+        """Return safe PDF review holds for an explicitly enabled auto-accept policy."""
+        with self._lock:
+            manifest = self._read_upgraded_manifest()
+        return [str(item["document_id"]) for item in manifest["documents"]
+                if item.get("content_type") == "application/pdf"
+                and _review_approval_eligible(item)]
 
     @staticmethod
     def _select_document_entry(manifest: dict, document_id: str, *,
@@ -954,23 +1185,106 @@ class KnowledgeRepository:
         return self._import_text(name, payload, classification=classification)
 
     def _recognize_images(self, rows: list[dict], source_hash: str) -> tuple[ImageArtifact, ...]:
-        images: list[ImageArtifact] = []
-        for image_index, row in enumerate(rows, 1):
+        """OCR independent images with bounded concurrency.
+
+        A manual can contain many diagrams.  Serial vision calls made one
+        stuck upstream request hold the whole document for hours.  Each image
+        remains independently attributable and an OCR failure stays local to
+        that image.
+        """
+        def recognize_one(image_index: int, row: dict) -> ImageArtifact:
             try:
                 output = self.ocr_provider.recognize(row["payload"])
             except OcrProcessingError:
                 output = OcrOutput("", None, "failed")
-            images.append(make_image_artifact(
+            return make_image_artifact(
                 document_source_hash=source_hash, image_index=image_index,
                 source_kind=row["source_kind"], page_number=row.get("page_number"),
                 page_image_index=int(row["page_image_index"]), payload=row["payload"],
                 mime_type=row["mime_type"], width=int(row["width"]), height=int(row["height"]),
                 output=output,
-            ))
-        return tuple(images)
+            )
+
+        if not rows:
+            return ()
+        workers = min(max(1, self.ocr_config.max_concurrent_images), len(rows))
+        images: list[ImageArtifact | None] = [None] * len(rows)
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rag-ocr") as pool:
+            futures = {
+                pool.submit(recognize_one, image_index, row): image_index - 1
+                for image_index, row in enumerate(rows, 1)
+            }
+            for future in as_completed(futures):
+                images[futures[future]] = future.result()
+        return tuple(image for image in images if image is not None)
 
     def _augment_pdf_with_ocr(self, payload: bytes, result: ParseResult,
                               source_hash: str) -> ParseResult:
+        complex_tables = [block for block in result.blocks
+                          if block.metadata.get("complex_table")]
+        if complex_tables:
+            recognize_table = getattr(self.ocr_provider, "recognize_table", None)
+            if not self.ocr_config.enabled or not callable(recognize_table):
+                raise OcrProcessingError("ocr_complex_table_requires_qwen_vl")
+            replacements = {}
+            rendered_tables: list[tuple[int, bytes]] = []
+            with pdfplumber.open(io.BytesIO(payload)) as document:
+                for block in complex_tables:
+                    try:
+                        page = document.pages[block.location.page_start - 1]
+                        image = page.crop(block.location.bbox, strict=False).to_image(
+                            resolution=self.ocr_config.pdf_dpi, antialias=True).original
+                        buffer = io.BytesIO()
+                        image.save(buffer, format="PNG")
+                        rendered_tables.append((block.ordinal, buffer.getvalue()))
+                    except Exception:
+                        # A single table is not allowed to block all usable
+                        # text and image evidence in a product manual.
+                        continue
+            workers = min(max(1, self.ocr_config.max_concurrent_images), len(rendered_tables))
+            if workers:
+                with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rag-table") as pool:
+                    futures = {
+                        pool.submit(recognize_table, table_payload): ordinal
+                        for ordinal, table_payload in rendered_tables
+                    }
+                    for future in as_completed(futures):
+                        try:
+                            text = future.result().text.strip()
+                        except Exception:
+                            continue
+                        if not text:
+                            continue
+                        text = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", text,
+                                      flags=re.IGNORECASE).strip()
+                        if not any(re.fullmatch(r"[|:+\-\s]+", line.strip())
+                                   and "---" in line for line in text.splitlines()):
+                            # Vision models sometimes return a readable table
+                            # without the Markdown separator row.  Preserve
+                            # every recognized row in a valid single-column
+                            # Markdown table instead of rejecting the document.
+                            rows = [line.strip().strip("|").strip() for line in text.splitlines()
+                                    if line.strip()]
+                            if not rows:
+                                continue
+                            escaped_rows = [row.replace("|", "\\|") for row in rows]
+                            text = "| 表格识别结果 |\n| --- |\n" + "\n".join(
+                                f"| {row} |" for row in escaped_rows
+                            )
+                        replacements[futures[future]] = text
+            blocks = tuple(replace(block, text=replacements[block.ordinal],
+                                   metadata={**block.metadata, "complex_table": False,
+                                             "table_source": "qwen_vl"})
+                           if block.ordinal in replacements else block
+                           for block in result.blocks)
+            page_counts = list(result.page_char_counts)
+            for block in complex_tables:
+                if block.ordinal in replacements:
+                    page_counts[block.location.page_start - 1] += (
+                        len(replacements[block.ordinal]) - len(block.text)
+                    )
+            result = replace(result, blocks=blocks,
+                             text_chars=sum(page_counts), page_char_counts=tuple(page_counts))
         if not self.ocr_config.enabled:
             return result
         rows = extract_pdf_images(payload, scanned_pages=set(result.blank_pages),
@@ -1045,8 +1359,8 @@ class KnowledgeRepository:
                 "chunk_status": "ready" if no_text else "pending",
                 "index_status": "indexed" if no_text else "pending", "indexed_count": 0,
                 "parent_count": 0 if no_text else None, "child_count": 0 if no_text else None,
-                "splitter_version": "parent-child-v1",
-                "parser": "paddleocr", "parser_version": self.ocr_provider.model_id,
+                "splitter_version": PARENT_SPLITTER_VERSION,
+                "parser": self.ocr_provider.model_id, "parser_version": self.ocr_provider.model_id,
                 "pages": 1, "text_chars": len(ocr_text), "text_page_ratio": 1.0,
                 "needs_ocr": False,
                 "parse_warnings": ([PdfWarningCode.OCR_LOW_CONFIDENCE.value] if low_confidence
@@ -1114,7 +1428,7 @@ class KnowledgeRepository:
                 "indexed_count": None,
                 "parent_count": None,
                 "child_count": None,
-                "splitter_version": "parent-child-v1",
+                "splitter_version": PARENT_SPLITTER_VERSION,
                 "parser": "stdlib",
                 "parser_version": "stdlib-1",
                 "pages": 1,
@@ -1134,7 +1448,7 @@ class KnowledgeRepository:
                 document = self._load_entry_document(entry)
                 parents, children = self.splitter.split(document)
                 entry.update(parent_count=len(parents), child_count=len(children),
-                             chunk_status="ready", index_status="ready")
+                             chunk_status="ready", index_status="pending")
                 manifest["documents"].append(entry)
                 self._write_manifest(manifest)
             except Exception:
@@ -1351,8 +1665,10 @@ class KnowledgeRepository:
                 and item.get("ingestion_route") == "index"
                 and item.get("index_status") in {"pending", "indexed"}]
 
-    def approve_review(self, document_id: str) -> dict:
+    def approve_review(self, document_id: str, *, approval_mode: str = "manual") -> dict:
         """Approve either safe low-confidence OCR text or a safe complex layout."""
+        if approval_mode not in {"manual", "automatic"}:
+            raise ValueError("knowledge_review_approval_mode_invalid")
         with self._lock:
             manifest = self._read_upgraded_manifest()
             item = self._select_document_entry(manifest, document_id)
@@ -1373,7 +1689,7 @@ class KnowledgeRepository:
                 approved_item.update(status="published", ingestion_route="index")
                 document = self._load_entry_document(approved_item)
                 parents, children = self.splitter.split(document)
-                splitter_version = "parent-child-v1"
+                splitter_version = PARENT_SPLITTER_VERSION
             else:
                 raise ValueError("knowledge_review_not_approvable")
             if not parents or not children:
@@ -1389,6 +1705,7 @@ class KnowledgeRepository:
                 splitter_version=splitter_version,
                 review_type=review_type,
                 review_approved_at=self._now(),
+                review_approval_mode=approval_mode,
                 last_error_code=None,
                 updated_at=self._now(),
             )
@@ -1412,17 +1729,30 @@ class KnowledgeRepository:
                     or item.get("chunk_status") != "ready"
                     or item.get("ingestion_route") != "index"):
                 raise ValueError("knowledge_pdf_not_indexable")
-            item.update(index_status="running", last_error_code=None, updated_at=self._now())
+            item.update(
+                index_status="running", last_error_code=None,
+                index_progress_stage="embedding", index_progress_completed=0,
+                index_progress_total=int(item.get("child_count") or 0),
+                updated_at=self._now(),
+            )
             self._write_manifest(manifest)
         try:
             document, parents, children = self.load_pdf_chunks(document_id)
-            result = index_prepared(document, parents, children)
+            parameters = inspect.signature(index_prepared).parameters
+            kwargs = {}
+            if "progress_callback" in parameters:
+                kwargs["progress_callback"] = (
+                    lambda stage, completed, total: self._record_index_progress(
+                        document_id, stage, completed, total,
+                    )
+                )
+            result = index_prepared(document, parents, children, **kwargs)
             if (int(result.get("parents", -1)) != len(parents)
                     or int(result.get("semantic_indexed", -1)) != len(children)
                     or int(result.get("keyword_indexed", -1)) != len(children)
                     or int(result.get("indexed_count", -1)) != len(children)):
                 raise RuntimeError("knowledge_index_count_mismatch")
-        except Exception:
+        except Exception as exc:
             with self._lock:
                 manifest = self._read_upgraded_manifest()
                 item = self._select_document_entry(manifest, document_id)
@@ -1430,7 +1760,8 @@ class KnowledgeRepository:
                     raise KeyError("knowledge_document_not_found")
                 if item.get("status") not in {"revoked", "revoke_pending"}:
                     item.update(index_status="failed", indexed_count=0,
-                                last_error_code=PdfErrorCode.INDEX_FAILED.value,
+                                index_progress_stage="failed",
+                                last_error_code=_index_failure_code(exc),
                                 processing_completed_at=self._now(), updated_at=self._now())
                 self._write_manifest(manifest)
             raise
@@ -1449,10 +1780,67 @@ class KnowledgeRepository:
                 child_count=len(children),
                 index_generation=int(item.get("index_generation") or 0) + 1,
                 embedding_model_id=result.get("model_id"),
+                index_progress_stage="completed",
+                index_progress_completed=len(children),
+                index_progress_total=len(children),
                 last_error_code=None,
                 processing_completed_at=self._now(),
                 updated_at=self._now(),
             )
+            self._write_manifest(manifest)
+            return dict(item)
+
+    def index_text(self, document_id: str, *, index_document) -> dict:
+        """Write prepared text chunks to all three indexes and record the result."""
+        with self._lock:
+            manifest = self._read_upgraded_manifest()
+            item = self._select_document_entry(manifest, document_id)
+            if item is None:
+                raise KeyError("knowledge_document_not_found")
+            if (item.get("content_type") == "application/pdf"
+                    or str(item.get("content_type", "")).startswith("image/")
+                    or item.get("status") != "published"
+                    or item.get("parse_status") != "ready"
+                    or item.get("chunk_status") != "ready"):
+                raise ValueError("knowledge_text_not_indexable")
+            item.update(index_status="running", last_error_code=None, updated_at=self._now())
+            self._write_manifest(manifest)
+        try:
+            document = self._load_entry_document(item)
+            parent_count = int(item.get("parent_count") or 0)
+            child_count = int(item.get("child_count") or 0)
+            parents, children = self.splitter.split(document)
+            if (parent_count <= 0 or child_count <= 0
+                    or len(parents) != parent_count or len(children) != child_count
+                    or item.get("splitter_version") != self.splitter.version):
+                raise RuntimeError("knowledge_chunk_integrity_failed")
+            result = index_document(document)
+            if (int(result.get("parents", -1)) != parent_count
+                    or int(result.get("semantic_indexed", -1)) != child_count
+                    or int(result.get("keyword_indexed", -1)) != child_count
+                    or int(result.get("indexed_count", -1)) != child_count):
+                raise RuntimeError("knowledge_index_count_mismatch")
+        except Exception as exc:
+            with self._lock:
+                manifest = self._read_upgraded_manifest()
+                item = self._select_document_entry(manifest, document_id)
+                if item is not None and item.get("status") not in {"revoked", "revoke_pending"}:
+                    item.update(index_status="failed", indexed_count=0,
+                                last_error_code=_index_failure_code(exc),
+                                updated_at=self._now())
+                    self._write_manifest(manifest)
+            raise
+        with self._lock:
+            manifest = self._read_upgraded_manifest()
+            item = self._select_document_entry(manifest, document_id)
+            if item is None:
+                raise KeyError("knowledge_document_not_found")
+            if item.get("status") in {"revoked", "revoke_pending"}:
+                return dict(item)
+            item.update(index_status="indexed", indexed_count=child_count,
+                        index_generation=int(item.get("index_generation") or 0) + 1,
+                        embedding_model_id=result.get("model_id"), last_error_code=None,
+                        updated_at=self._now())
             self._write_manifest(manifest)
             return dict(item)
 
@@ -1477,12 +1865,12 @@ class KnowledgeRepository:
             if (int(result.get("semantic_indexed", -1)) != expected
                     or int(result.get("keyword_indexed", -1)) != expected):
                 raise RuntimeError("knowledge_index_count_mismatch")
-        except Exception:
+        except Exception as exc:
             with self._lock:
                 manifest = self._read_upgraded_manifest()
                 item = self._select_document_entry(manifest, document_id)
                 item.update(index_status="failed", indexed_count=0,
-                            last_error_code=PdfErrorCode.INDEX_FAILED.value,
+                            last_error_code=_index_failure_code(exc),
                             updated_at=self._now())
                 self._write_manifest(manifest)
             raise
@@ -1508,6 +1896,69 @@ class KnowledgeRepository:
                 raise ValueError("revoked_knowledge_cannot_be_published")
             item["classification"] = classification
             item["updated_at"] = self._now()
+            self._write_manifest(manifest)
+            return dict(item)
+
+    def set_document_metadata(
+        self, document_id: str, *, document_type: str,
+        document_version: str, product_models: list[str],
+        logical_document_key: str = "",
+    ) -> dict:
+        """Update retrieval metadata and mark the document for a clean rebuild."""
+        allowed_types = {
+            "product_info", "product_manual", "maintenance_manual",
+            "warranty_policy", "faq",
+            # Accept old values while existing manifests are migrated.
+            "datasheet", "after_sales_guide", "product_document",
+        }
+        normalized_type = str(document_type or "").strip().casefold()
+        normalized_version = str(document_version or "").strip()[:80]
+        if normalized_type not in allowed_types:
+            raise ValueError("invalid_knowledge_document_type")
+        if not normalized_version:
+            raise ValueError("invalid_knowledge_document_version")
+        normalized_models: list[str] = []
+        for raw in product_models or ():
+            value = re.sub(r"\s+", " ", str(raw)).strip()[:80]
+            if (value and value.casefold() not in
+                    {row.casefold() for row in normalized_models}):
+                normalized_models.append(value)
+        if len(normalized_models) > 20:
+            raise ValueError("too_many_knowledge_product_models")
+        with self._lock:
+            manifest = self._read_upgraded_manifest()
+            item = self._select_document_entry(manifest, document_id)
+            if item is None:
+                raise KeyError("knowledge_document_not_found")
+            if item.get("status") in {"revoked", "revoke_pending"}:
+                raise ValueError("revoked_knowledge_metadata_read_only")
+            key = str(logical_document_key or "").strip()
+            if key:
+                key = re.sub(r"[^0-9a-z\u4e00-\u9fff-]+", "-", key.casefold()).strip("-")[:120]
+            else:
+                key = _logical_document_key(str(item.get("title") or document_id))
+            was_indexed = item.get("index_status") == "indexed"
+            item.update(
+                document_type=normalized_type,
+                document_version=normalized_version,
+                product_models=normalized_models,
+                logical_document_key=key,
+                metadata_source="operator",
+                metadata_review_required=False,
+                updated_at=self._now(),
+            )
+            if was_indexed:
+                item.update(
+                    index_status="pending", indexed_count=0,
+                    index_progress_stage="metadata_rebuild",
+                    index_progress_completed=0, index_progress_total=0,
+                    processing_completed_at=None, last_error_code=None,
+                )
+                if item.get("content_type") == "application/pdf":
+                    item.update(
+                        status="draft", chunk_status="pending",
+                        parent_count=None, child_count=None,
+                    )
             self._write_manifest(manifest)
             return dict(item)
 
@@ -1546,6 +1997,13 @@ class KnowledgeRepository:
             "parent_count": sum(int(item.get("parent_count") or 0) for item in items),
             "child_count": sum(int(item.get("child_count") or 0) for item in items),
             "indexed_count": sum(int(item.get("indexed_count") or 0) for item in items),
+            "failed_document_count": sum(
+                "failed" in {
+                    item.get("parse_status"), item.get("chunk_status"),
+                    item.get("index_status"),
+                }
+                for item in items
+            ),
             "index_error_count": sum(item.get("index_status") == "failed" for item in items),
             "parse_error_count": sum(item.get("parse_status") == "failed" for item in items),
             "needs_ocr_count": sum(bool(item.get("needs_ocr")) for item in items),
@@ -1607,21 +2065,11 @@ class KnowledgeRepository:
                 raise KeyError("knowledge_document_not_found")
             if item.get("index_status") != "failed" or item.get("status") != "published":
                 raise ValueError("knowledge_retry_not_allowed")
-            if item.get("content_type") == "application/pdf":
-                pass
-            elif str(item.get("content_type", "")).startswith("image/"):
-                pass
-            else:
-                document = self._load_entry_document(item)
-                index_document(document)
-                parents, children = self.splitter.split(document)
-                item.update(index_status="ready", parent_count=len(parents), child_count=len(children),
-                            chunk_status="ready", last_error_code=None, updated_at=self._now())
-                self._write_manifest(manifest)
-                return dict(item)
         if item.get("content_type") == "application/pdf":
             return self.index_pdf(document_id, index_prepared=index_document)
-        return self.index_image(document_id, index_document=index_document)
+        if str(item.get("content_type", "")).startswith("image/"):
+            return self.index_image(document_id, index_document=index_document)
+        return self.index_text(document_id, index_document=index_document)
 
     def record_reconciled_index(self, document_id: str, *, indexed_count: int,
                                 embedding_model_id: str) -> dict:

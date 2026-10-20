@@ -18,3 +18,9 @@
 - [项目结构](project/PROJECT_STRUCTURE.md)
 - [项目进度](project/PROJECT_PROGRESS.md)
 - [项目变更记录](project/PROJECT_CHANGELOG.md)
+
+待实施方案：
+
+- [外贸询盘双 Agent 工作流修改策略](project/外贸询盘双Agent工作流修改策略.md)（2026-09-22，待实施设计）
+
+- [询盘工作流运行说明](architecture/INQUIRY_WORKFLOW.md)

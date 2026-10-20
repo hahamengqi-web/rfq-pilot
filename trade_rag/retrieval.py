@@ -15,8 +15,23 @@ class QueryRouter:
         return "mysql" if any(term in normalized for term in self.dynamic_terms) else "rag"
 
 class QualityGate:
+    rerank_no_evidence_score = 0.50
+    rerank_high_confidence_score = 0.90
+
     def classify(self, results: list[SearchResult]) -> str:
         if not results: return "NO_EVIDENCE"
+        # Qwen3 reranker scores are absolute relevance scores.  Calibration on
+        # the current TP-LINK manuals put direct answers at 0.997+ while
+        # unsupported questions stayed below 0.85.  Do not apply the old
+        # relative-score gap rule to these scores: two adjacent passages often
+        # both contain the same valid answer.
+        if results[0].rerank_score is not None:
+            score = float(results[0].rerank_score)
+            if score < self.rerank_no_evidence_score:
+                return "NO_EVIDENCE"
+            if score < self.rerank_high_confidence_score:
+                return "AMBIGUOUS"
+            return "HIGH_CONFIDENCE"
         if results[0].score <= 0: return "NO_EVIDENCE"
         if results[0].score < 0.15: return "AMBIGUOUS"
         # Overlapping children from the same parent are corroborating passages,

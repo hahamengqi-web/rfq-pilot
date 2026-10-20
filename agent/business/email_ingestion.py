@@ -36,6 +36,15 @@ class EmailIngestionService:
         self.extractor_version = extractor_version
 
     async def ingest(self, envelope: EmailEnvelope) -> dict:
+        from agent.inquiry.config import InquirySettings
+        settings = InquirySettings.from_env()
+        if settings.enabled:
+            from agent.inquiry.runtime import ingest_envelope
+            result = await asyncio.to_thread(ingest_envelope, envelope, settings=settings)
+            # Advance only after both exact S3 original and business message commit.
+            self.repository.advance_cursor(envelope.account_id, envelope.folder, envelope.uidvalidity, envelope.uid)
+            return {"inquiry_id": result.get("inquiry_id"), "customer_id": result.get("customer_id"),
+                    "state": result["state"], "status": "workflow_queued"}
         classification_code = None
         if self.message_filter is not None:
             classification = self.message_filter(envelope)
@@ -109,6 +118,9 @@ class EmailIngestionService:
                     "error_code": type(exc).__name__}
 
     async def recover_pending(self, limit: int = 20) -> list[dict]:
+        from agent.inquiry.config import InquirySettings
+        if InquirySettings.from_env().enabled:
+            return []  # Inquiry jobs are recovered by the durable workflow worker.
         results = []
         required_classification = "email_trade_rfq_accepted" if self.message_filter else None
         for email_id in self.repository.recoverable_extractions(

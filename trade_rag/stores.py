@@ -4,13 +4,15 @@ from dataclasses import dataclass
 import re
 from typing import Protocol
 from .contracts import ChildChunk, CanonicalDocument, ParentChunk, Actor, SearchResult
+from .text_normalization import normalize_search_text
 
 
 class VectorStore(Protocol):
     """Stable semantic-store contract shared by memory, SQLite, pgvector and Milvus."""
 
     def upsert(self, children, source: CanonicalDocument, vectors) -> int: ...
-    def search(self, vector, actor: Actor, limit: int = 30) -> list[SearchResult]: ...
+    def search(self, vector, actor: Actor, limit: int = 30,
+               allowed_document_ids=()) -> list[SearchResult]: ...
     def delete_by_document(self, document_id: str, version: int | None = None) -> int: ...
 
 @dataclass
@@ -25,10 +27,13 @@ class InMemoryVectorStore:
         if len(rows) != len(values): raise ValueError("embedding_count_mismatch")
         for child, vector in zip(rows, values): self._entries[child.child_id] = _Entry(child, source, vector)
         return len(rows)
-    def search(self, vector, actor: Actor, limit: int = 30):
+    def search(self, vector, actor: Actor, limit: int = 30,
+               allowed_document_ids=()):
+        allowed = set(allowed_document_ids)
         def cosine(v): return sum(a*b for a,b in zip(v, vector)) / ((sum(a*a for a in v)*sum(a*a for a in vector))**0.5 or 1)
         rows=[]
         for e in self._entries.values():
+            if allowed and e.source.document_id not in allowed: continue
             if not e.source.is_searchable() or e.source.business_unit_id != actor.business_unit_id: continue
             if "customer" in actor.roles and e.source.classification != "public": continue
             if e.source.allowed_roles and not (e.source.allowed_roles & actor.roles): continue
@@ -47,14 +52,23 @@ class InMemoryKeywordStore:
         rows = list(children)
         for child in rows: self._entries[child.child_id] = (child, source)
         return len(rows)
-    def search(self, query: str, actor: Actor, limit: int = 30):
-        terms = re.findall(r"[\w\u4e00-\u9fff]+", query.casefold())
+    def search(self, query: str, actor: Actor, limit: int = 30,
+               allowed_document_ids=()):
+        # A repeated place or product name must not outrank a document that
+        # matches more distinct parts of the question. Preserve query order
+        # while counting each term at most once.
+        terms = list(dict.fromkeys(re.findall(
+            r"[\w\u4e00-\u9fff]+", normalize_search_text(query).casefold(),
+        )))
+        allowed = set(allowed_document_ids)
         rows=[]
         for child, source in self._entries.values():
+            if allowed and source.document_id not in allowed: continue
             if not source.is_searchable() or source.business_unit_id != actor.business_unit_id: continue
             if "customer" in actor.roles and source.classification != "public": continue
             if source.allowed_roles and not (source.allowed_roles & actor.roles): continue
-            text = child.text.casefold(); score = sum(text.count(term) for term in terms)
+            text = normalize_search_text(child.text).casefold()
+            score = sum(term in text for term in terms)
             if score: rows.append(SearchResult(child, float(score), source, retrieval_source="keyword"))
         return sorted(rows, key=lambda x: x.score, reverse=True)[:limit]
     def delete_by_document(self, document_id: str, version: int | None = None) -> int:

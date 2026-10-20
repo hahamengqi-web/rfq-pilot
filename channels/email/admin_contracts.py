@@ -142,6 +142,7 @@ class EmailAccountResponse:
 
 EMAIL_ADMIN_ROUTE_CONTRACT: Final = (
     ("GET", "/api/email/providers", "public_provider_presets"),
+    ("GET", "/api/email/workflow", "inquiry_workflow"),
     ("GET", "/api/email/accounts", "protected_m1"),
     ("POST", "/api/email/accounts", "protected_m1"),
     ("PATCH", "/api/email/accounts/{account_id}", "protected_m1"),

@@ -31,6 +31,10 @@ def approve_outbound_message_impl(
     Returns:
         审批结果
     """
+    from agent.inquiry.config import InquirySettings
+    if InquirySettings.from_env().enabled:
+        return json.dumps({"error": "inquiry_workflow_required", "message": "请在询盘工作台完成审核和报价。"}, ensure_ascii=False)
+
     quote = get_quote(quote_id)
     if not quote:
         return json.dumps({"error": f"报价单 #{quote_id} 不存在"}, ensure_ascii=False, indent=2)

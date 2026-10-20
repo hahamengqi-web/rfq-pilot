@@ -13,6 +13,7 @@ from .contracts import Actor, CanonicalDocument, ChildChunk, DocumentStatus, Sea
 COLLECTION_PREFIX = "trade_knowledge_v"
 ACTIVE_ALIAS = "trade_knowledge_active"
 _GENERATION_RE = re.compile(r"^trade_knowledge_v([1-9][0-9]*)$")
+_UPSERT_BATCH_SIZE = 32
 
 OUTPUT_FIELDS = [
     "child_id", "document_id", "document_version", "parent_id", "child_text",
@@ -136,26 +137,35 @@ class MilvusStore:
         if not entities:
             return 0
         client = self._get_client()
-        client.upsert(self.collection, entities)
+        # Milvus gRPC rejects requests above its message limit. Large manuals can
+        # contain hundreds of child chunks, so write bounded batches instead of
+        # sending the whole document in one request.
+        for offset in range(0, len(entities), _UPSERT_BATCH_SIZE):
+            client.upsert(self.collection, entities[offset:offset + _UPSERT_BATCH_SIZE])
         if flush:
             client.flush(self.collection)
         return len(entities)
 
-    def _search_filter(self, actor: Actor) -> str:
+    def _search_filter(self, actor: Actor, allowed_document_ids=()) -> str:
         now_ms = int(time.time() * 1000)
         role_filter = "is_public == true"
         if actor.roles:
             roles = json.dumps(sorted(actor.roles), ensure_ascii=True)
             role_filter = f"(is_public == true or ARRAY_CONTAINS_ANY(allowed_roles, {roles}))"
         customer_filter = ' and classification == "public"' if "customer" in actor.roles else ""
+        document_filter = ""
+        if allowed_document_ids:
+            values = json.dumps(sorted(set(allowed_document_ids)), ensure_ascii=True)
+            document_filter = f" and document_id in {values}"
         return (
             f"business_unit_id == {_literal(actor.business_unit_id)} and {role_filter} "
             'and document_status in ["approved", "published"] '
             f"and (expires_at_epoch_ms == 0 or expires_at_epoch_ms > {now_ms})"
-            f"{customer_filter}"
+            f"{customer_filter}{document_filter}"
         )
 
-    def search(self, vector, actor: Actor, limit: int = 30) -> list[SearchResult]:
+    def search(self, vector, actor: Actor, limit: int = 30,
+               allowed_document_ids=()) -> list[SearchResult]:
         values = list(vector)
         if len(values) != self.config.dimensions:
             raise ValueError("embedding_dimension_mismatch")
@@ -165,7 +175,7 @@ class MilvusStore:
             self.collection,
             data=[values],
             anns_field="embedding",
-            filter=self._search_filter(actor),
+            filter=self._search_filter(actor, allowed_document_ids),
             limit=limit,
             output_fields=OUTPUT_FIELDS,
             search_params={"metric_type": "COSINE", "params": {}},
@@ -199,7 +209,19 @@ class MilvusStore:
         return results[:limit]
 
     def _generation_collections(self) -> list[str]:
-        names = self._get_client().list_collections()
+        client = self._get_client()
+        names = set(client.list_collections())
+        # Some Milvus deployments expose the active collection through its
+        # alias while list_collections() returns an empty list for that
+        # database.  Always include the validated alias target, otherwise a
+        # reindex silently leaves every previous vector behind.
+        try:
+            alias = client.describe_alias(self.config.milvus_alias)
+            target = alias.get("collection_name") or alias.get("collection")
+            if isinstance(target, str):
+                names.add(target)
+        except Exception:
+            pass
         return sorted(name for name in names if _GENERATION_RE.fullmatch(name))
 
     def delete_by_document(self, document_id: str, version: int | None = None) -> int:

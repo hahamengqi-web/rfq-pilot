@@ -89,7 +89,12 @@ class OpenAICompatibleEmbeddingAdapter:
         return True
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        payload = json.dumps({"model": self.model_id, "input": texts}).encode("utf-8")
+        payload = json.dumps({
+            "model": self.model_id,
+            "input": texts,
+            "dimensions": self.dimensions,
+            "encoding_format": "float",
+        }).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}/embeddings", data=payload, method="POST",
             headers={

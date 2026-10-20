@@ -39,13 +39,17 @@ class EmailEnvelope:
     html_body_hash: str = ""
     attachments: tuple[AttachmentMeta, ...] = field(default_factory=tuple)
     raw_sha256: str = ""
+    references: tuple[str, ...] = ()
+    raw_bytes: bytes = field(default=b"", repr=False, compare=False)
 
     @property
     def idempotency_key(self) -> str:
         return f"{self.account_id}:{self.folder}:{self.uidvalidity}:{self.uid}"
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        result = asdict(self)
+        result.pop("raw_bytes", None)
+        return result
 
 
 class EmailSource(Protocol):

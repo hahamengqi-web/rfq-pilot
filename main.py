@@ -35,15 +35,24 @@ from agent.tools.customer_product import (
     GetProductDetailsTool,
     SearchProductsTool,
 )
-from agent.tools.workspace_peer import WorkspaceKnowledgeAnalysisTool, WorkspaceProductAnalysisTool
 from agent.tools.web_search import WebSearchTool
 from agent.tools.spawn import SpawnSubagentTool
+from agent.tools.customer_public import CustomerPublicKnowledgeTool
+from agent.tools.customer_catalog import CustomerStructuredCatalogTool
+from agent.customer_service import (
+    CustomerHarnessSettings,
+    CustomerLongTermMemory,
+    CustomerServiceHarness,
+    HybridIntentRouter,
+    RedisConversationMemory,
+    ReliableToolExecutor,
+    CustomerHandoffService,
+)
 from agent.tools.mcp_server import MCPClientManager
 from agent.skills import SkillsLoader
 from agent.context import ContextBuilder
 from agent.internal_langgraph_agent import NanoClawEmployeeAgentAdapter
 from agent.loop import AgentLoop
-from agent.customer_agent import CustomerAgent
 from agent.customer_product import (
     CustomerContextBinding,
     PermissionAwareRagRetriever,
@@ -57,10 +66,10 @@ from channels.cli import CLIChannel
 from channels.feishu import FeishuChannel
 from channels.qq import QQChannel
 from channels.web import WebChannel
+from channels.customer_portal import CustomerPortalChannel
 from trade_rag.knowledge_repository import KnowledgeRepository
 from trade_rag.pdf_ingestion import PdfIngestionCoordinator
 from trade_rag.pipeline import RagPipeline
-from channels.customer_portal import CustomerPortalChannel
 from agent.customer_identity import (
     Argon2PasswordHasher,
     CustomerIdentityRepository,
@@ -113,7 +122,6 @@ from agent.tools.read_customer_memory import ReadCustomerMemoryTool
 from gateway import Gateway
 from gateway_coordination import coordinator_from_environment
 from agent.workflow import WorkflowService
-from agent.peer_coordination import WorkspacePeerCoordinator
 from agent.business.email_config import load_email_config
 from agent.business.email_repository import EmailRepository
 from agent.business.email_notification import QQNotificationDispatcher
@@ -285,199 +293,13 @@ def _customer_path(
     return str(resolved)
 
 
-def build_workspace_peer_agent(config, session_key: str) -> AgentLoop:
-    """Build a same-level workspace analysis agent with read-only internal tools."""
-    if not session_key.startswith("workspace_peer:"):
-        raise ValueError("workspace peer requires a workspace_peer session key")
-    if not config.api_key:
-        raise RuntimeError("workspace_peer_provider_not_configured")
-    provider = OpenAICompatProvider(
-        api_key=config.api_key, base_url=config.base_url, model=config.model,
-    )
-    tools = ToolRegistry()
-    tools.register(WorkspaceKnowledgeAnalysisTool())
-    tools.register(WorkspaceProductAnalysisTool())
-    session_manager = create_session_manager(
-        os.path.join(config.workspace, "workspace", "peer_sessions")
-    )
-    context = ContextBuilder(
-        workspace=config.workspace,
-        identity_file=config.identity_file,
-        skills_summary="",
-        include_memory=True,
-        include_workspace_details=False,
-    )
-    return AgentLoop(
-        provider=provider,
-        tools=tools,
-        context=context,
-        session_manager=session_manager,
-        model=config.model,
-        max_iterations=min(config.max_iterations, 6),
-        session_key=session_key,
-        workflow_service=None,
-    )
-
-
-def build_customer_agent(config, session_key: str, peer_coordinator=None) -> CustomerAgent:
-    """Build the public agent with only filtered knowledge/catalog reads."""
-    if not session_key.startswith("customer_portal:"):
-        raise ValueError("customer agent requires a customer_portal session key")
-    if not config.api_key:
-        raise RuntimeError("customer_agent_provider_not_configured")
-
-    identity_path = _customer_path(
-        config.workspace,
-        config.customer_identity_file,
-        forbidden=(config.identity_file,),
-    )
-    if not os.path.isfile(identity_path):
-        raise RuntimeError("customer_identity_not_configured")
-
-    session_dir = _customer_path(
-        config.workspace,
-        getattr(config, "customer_session_dir", "workspace/customer_sessions"),
-        forbidden=("workspace/sessions",),
-    )
-    memory_file = _customer_path(
-        config.workspace,
-        getattr(config, "customer_memory_file", "workspace/customer_memory/PUBLIC_MEMORY.md"),
-        forbidden=("workspace/memory/MEMORY.md",),
-        required_parent="workspace/customer_memory",
-    )
-    memory_enabled = bool(getattr(config, "customer_memory_enabled", True))
-
-    provider = OpenAICompatProvider(
-        api_key=config.api_key,
-        base_url=config.base_url,
-        model=config.model,
-    )
-    public_memory_store = None
-    if getattr(config, "customer_long_term_memory_enabled", False):
-        public_memory_store = PublicApprovedMemoryStore(
-            os.path.join(config.workspace, "workspace", "customer_memory", "public_memory.db")
-        )
-        public_memory_store.import_approved_markdown(memory_file)
-    request_binding = CustomerContextBinding(
-        allow_anonymous=not bool(getattr(config, "access_control_enabled", False)),
-        default_tenant=str(getattr(config, "access_tenant_id", "default")),
-        customer_level=str(getattr(config, "customer_product_default_level", "standard")),
-        default_region=str(getattr(config, "customer_product_default_region", "GLOBAL")),
-        default_currency=str(getattr(config, "customer_product_default_currency", "USD")),
-    )
-    product_cache = create_product_cache(
-        str(getattr(config, "customer_product_redis_url", "")),
-        prefix=str(getattr(
-            config, "customer_product_cache_prefix", "nanoclaw:customer-product",
-        )),
-    )
-    product_rag = PermissionAwareRagRetriever(
-        pipeline=RagPipeline(),
-        repository=KnowledgeRepository(),
-        public_memory_store=public_memory_store,
-    )
-    product_service = ProductQueryService(
-        request_binding, product_cache, product_rag,
-        cache_ttl_seconds=int(getattr(config, "customer_product_cache_ttl_seconds", 300)),
-        data_version=str(getattr(config, "customer_product_data_version", "products-v1")),
-        rate_limit_per_minute=int(getattr(
-            config, "customer_product_rate_limit_per_minute", 60,
-        )),
-    )
-    tools = ToolRegistry()
-    tools.register(SearchProductsTool(product_service))
-    tools.register(GetProductDetailsTool(product_service))
-    tools.register(CompareProductsTool(product_service))
-    customer_m2_enabled = bool(
-        getattr(config, "customer_conversation_memory_enabled", False)
-        and session_key.startswith("customer_portal:account:")
-    )
-    if customer_m2_enabled:
-        session_manager = create_session_manager(
-            session_dir,
-            max_turns=config.memory_max_turns,
-            summarizer=ProviderTurnSummarizer(provider, model=config.model),
-        )
-        customer_working_store = CustomerWorkingMemoryStore(
-            os.path.join(config.workspace, config.customer_data_database_path)
-        )
-        customer_long_term_store = None
-        if getattr(config, "customer_long_term_memory_enabled", False):
-            customer_main_store = _customer_memory_store(
-                config,
-                indexing_enabled=True,
-            )
-            customer_long_term_store = (
-                _customer_hybrid_retriever(
-                    config, customer_main_store, readonly_indexes=True,
-                )
-                if getattr(config, "memory_hybrid_retrieval_enabled", False)
-                else customer_main_store
-            )
-        memory_lifecycle = BoundedWorkingMemoryLifecycle(
-            session_manager, customer_store=customer_working_store,
-            long_term_store=customer_long_term_store,
-            recall_top_k=config.memory_recall_top_k,
-        )
-        memory_context_provider = StructuredWorkingMemoryContextProvider()
-
-        def memory_request_factory(key, request_id, message, history, trusted):
-            account_id = str(trusted.get("account_id") or "")
-            tenant_id = str(trusted.get("tenant_id") or "")
-            conversation_id = str(trusted.get("conversation_id") or "")
-            return TurnRequest(
-                request_id, ActorContext(
-                    "customer", account_id, tenant_id, frozenset(), True,
-                ),
-                MemoryScope(
-                    "customer_conversation", tenant_id, account_id=account_id,
-                    conversation_id=conversation_id, purpose="customer_support",
-                ),
-                message, history, key,
-            )
-    else:
-        session_manager = create_session_manager(session_dir)
-        memory_lifecycle = None
-        memory_context_provider = None
-        memory_request_factory = None
-    context = ContextBuilder(
-        workspace=config.workspace,
-        identity_file=os.path.relpath(identity_path, Path(config.workspace).resolve()),
-        skills_summary="",
-        include_memory=memory_enabled and not customer_m2_enabled,
-        include_workspace_details=False,
-        memory_file=memory_file,
-        memory_management_guidance=False,
-        memory_context_provider=memory_context_provider,
-    )
-    agent = CustomerAgent(
-        provider=provider,
-        tools=tools,
-        context=context,
-        session_manager=session_manager,
-        model=config.model,
-        max_iterations=min(config.max_iterations, 4),
-        session_key=session_key,
-        workflow_service=None,
-        peer_coordinator=peer_coordinator,
-        memory_lifecycle=memory_lifecycle,
-        memory_request_factory=memory_request_factory,
-        request_binding=request_binding,
-        langchain_enabled=bool(getattr(config, "customer_product_langchain_enabled", True)),
-    )
-    print(
-        f"[{session_key}] 客户产品咨询 Agent 已隔离启动："
-        "LangChain + 三个受控产品查询工具；不挂载运费或内部业务工具"
-    )
-    return agent
-
-
 def build_agent(config, session_key: str, mcp_manager: MCPClientManager = None,
                 workflow_service: WorkflowService | None = None,
-                workspace_peer: WorkspacePeerCoordinator | None = None,
                 customer_memory_reader: CustomerMemoryReader | None = None,
                 workspace_actor: ActorContext | None = None,
-                workspace_runtime: dict | None = None) -> AgentLoop:
+                workspace_runtime: dict | None = None,
+                customer_memory_service: CustomerMemoryService | None = None,
+                customer_memory_retriever=None) -> AgentLoop:
     """
     组装 Agent 实例
     Args:
@@ -497,7 +319,10 @@ def build_agent(config, session_key: str, mcp_manager: MCPClientManager = None,
         AgentLoop: 组装完成的 Agent 实例
     """
     if session_key.startswith("customer_portal:"):
-        return build_customer_agent(config, session_key, workspace_peer)
+        return build_customer_agent(
+            config, session_key, customer_memory_service=customer_memory_service,
+            customer_memory_retriever=customer_memory_retriever,
+        )
 
     # 验证 API 密钥
     if not config.api_key:
@@ -691,6 +516,81 @@ def build_agent(config, session_key: str, mcp_manager: MCPClientManager = None,
     return agent
 
 
+def build_customer_agent(
+    config, session_key: str,
+    customer_memory_service: CustomerMemoryService | None = None,
+    customer_memory_retriever=None,
+) -> CustomerServiceHarness:
+    """Build the customer Harness with public RAG as its only information tool."""
+    if not config.api_key:
+        raise RuntimeError("customer_agent_model_not_configured")
+
+    provider = OpenAICompatProvider(
+        api_key=config.api_key,
+        base_url=config.base_url,
+        model=config.model,
+    )
+    settings = CustomerHarnessSettings(
+        redis_url=config.customer_harness_redis_url,
+        redis_prefix=config.customer_harness_redis_prefix,
+        session_ttl_seconds=config.customer_harness_session_ttl_seconds,
+        response_cache_ttl_seconds=(
+            config.customer_harness_response_cache_ttl_seconds
+        ),
+        summary_turns=config.customer_harness_summary_turns,
+        recent_turns=config.customer_harness_recent_turns,
+        route_confidence_threshold=config.customer_harness_route_confidence,
+        private_context_transfer_approved=(
+            config.customer_harness_private_context_transfer_approved
+        ),
+        tool_timeout_seconds=config.customer_harness_tool_timeout_seconds,
+        tool_max_attempts=config.customer_harness_tool_max_attempts,
+        backoff_base_seconds=config.customer_harness_backoff_base_seconds,
+        circuit_window=config.customer_harness_circuit_window,
+        circuit_failure_threshold=config.customer_harness_circuit_failure_threshold,
+        circuit_consecutive_failures=config.customer_harness_circuit_consecutive_failures,
+        circuit_cooldown_seconds=config.customer_harness_circuit_cooldown_seconds,
+    )
+    routing_model = (
+        config.llm_routing_model
+        or (config.models or {}).get("cheap")
+        or config.model
+    )
+    memory = RedisConversationMemory(settings, provider, model=routing_model)
+    tool = CustomerPublicKnowledgeTool()
+    catalog_tool = CustomerStructuredCatalogTool()
+    return CustomerServiceHarness(
+        session_key=session_key,
+        provider=provider,
+        model=config.model,
+        knowledge_tool=tool,
+        memory=memory,
+        router=HybridIntentRouter(
+            provider, model=routing_model,
+            confidence_threshold=settings.route_confidence_threshold,
+            private_context_transfer_approved=(
+                settings.private_context_transfer_approved
+            ),
+        ),
+        executor=ReliableToolExecutor(memory, settings),
+        catalog_tool=catalog_tool,
+        long_term_memory=(
+            CustomerLongTermMemory(
+                customer_memory_service,
+                search_backend=customer_memory_retriever,
+            )
+            if customer_memory_service is not None else None
+        ),
+        private_context_transfer_approved=(
+            settings.private_context_transfer_approved
+        ),
+        public_contact_email=(
+            os.environ.get("NANOCLAW_PUBLIC_SALES_EMAIL", "").strip()
+            or "sales@qq.com"
+        ),
+    )
+
+
 async def interactive_loop(agent: AgentLoop) -> None:
     """
     交互式对话循环
@@ -839,14 +739,23 @@ async def async_main() -> None:
     # 定义 Agent 工厂函数
     workspace_customer_reader = None
     workspace_reader_actor = None
-    workspace_peer = WorkspacePeerCoordinator(
-        lambda peer_session_key: build_workspace_peer_agent(config, peer_session_key)
+    customer_memory_service = (
+        CustomerMemoryService(_customer_memory_store(config, indexing_enabled=True))
+        if config.customer_long_term_memory_enabled else None
+    )
+    customer_memory_retriever = (
+        _customer_hybrid_retriever(
+            config, customer_memory_service.store, readonly_indexes=True,
+        )
+        if customer_memory_service is not None
+        and config.memory_hybrid_retrieval_enabled else None
     )
 
     def create_agent(session_key: str) -> AgentLoop:
         return build_agent(
-            config, session_key, mcp_manager, workflow_service, workspace_peer,
+            config, session_key, mcp_manager, workflow_service,
             workspace_customer_reader, workspace_reader_actor, workspace_runtime,
+            customer_memory_service, customer_memory_retriever,
         )
 
     def create_routed_agent(session_key: str, agent_id: str) -> AgentLoop:
@@ -854,14 +763,6 @@ async def async_main() -> None:
             selected = AgentRoute(agent_id)
         except ValueError as exc:
             raise RouteError("agent_route_invalid") from exc
-        if selected == AgentRoute.CUSTOMER_PRODUCT_CONSULTATION:
-            customer_session_key = (
-                session_key if session_key.startswith("customer_portal:")
-                else f"customer_portal:routed:{session_key}"
-            )
-            return build_customer_agent(
-                config, customer_session_key, workspace_peer,
-            )
         if selected == AgentRoute.INTERNAL_QUOTE_REPLY:
             if session_key.startswith("customer_portal:"):
                 raise RouteError("agent_access_denied")
@@ -894,6 +795,10 @@ async def async_main() -> None:
     shared_pdf_ingestion = PdfIngestionCoordinator(
         shared_knowledge_repository, shared_knowledge_pipeline,
     )
+    customer_handoff_service = CustomerHandoffService(
+        config.customer_harness_redis_url,
+        config.customer_harness_redis_prefix,
+    )
     shared_conversations = conversation_backend() == "mysql"
     workspace_conversations = (
         MySQLWorkspaceConversationService(
@@ -910,7 +815,8 @@ async def async_main() -> None:
                                  knowledge_pipeline=shared_knowledge_pipeline,
                                  pdf_ingestion=shared_pdf_ingestion,
                                  root_page="landing", access_service=access_service,
-                                 access_control_enabled=config.access_control_enabled)
+                                 access_control_enabled=config.access_control_enabled,
+                                 customer_handoff_service=customer_handoff_service)
         channels.append(web_channel)
         print(f"[启动] 已启用 Web 渠道: http://{config.web_host}:{config.web_port}")
     else:
@@ -925,9 +831,10 @@ async def async_main() -> None:
             knowledge_repository=shared_knowledge_repository,
             knowledge_pipeline=shared_knowledge_pipeline,
             pdf_ingestion=shared_pdf_ingestion,
-            channel_name="workspace_web", root_page="workspace",
+            channel_name="workspace_web", root_page="internal",
             access_service=access_service,
             access_control_enabled=config.access_control_enabled,
+            customer_handoff_service=customer_handoff_service,
         )
         channels.append(dedicated_workspace)
         print(
@@ -935,62 +842,50 @@ async def async_main() -> None:
             f"http://{config.workspace_web_host}:{config.workspace_web_port}"
         )
 
-    customer_memory_service = None
     if config.customer_portal_enabled:
         customer_identity_service = None
-        customer_conversation_repository = None
+        customer_conversations = None
         if config.customer_auth_enabled:
-            session_secret = os.environ.get("NANOCLAW_CUSTOMER_SESSION_SECRET", "")
-            if len(session_secret) < 32:
-                raise RuntimeError("customer_session_secret_not_configured")
-            customer_identity_repository = (
-                MySQLCustomerIdentityRepository()
-                if shared_conversations else CustomerIdentityRepository(
+            cursor_secret = (
+                os.environ.get("NANOCLAW_CUSTOMER_SESSION_SECRET", "").encode("utf-8")
+                or os.urandom(32)
+            )
+            if conversation_backend() == "mysql":
+                customer_identity_repository = MySQLCustomerIdentityRepository()
+                customer_conversations = MySQLCustomerConversationRepository(
+                    cursor_secret=cursor_secret,
+                )
+            else:
+                customer_identity_repository = CustomerIdentityRepository(
                     os.path.join(config.workspace, config.customer_auth_database_path)
                 )
-            )
+                customer_conversations = CustomerConversationRepository(
+                    os.path.join(config.workspace, config.customer_data_database_path),
+                    cursor_secret=cursor_secret,
+                )
             customer_identity_service = CustomerIdentityService(
                 customer_identity_repository,
-                ScryptPasswordHasher(),
+                Argon2PasswordHasher(),
+                tenant_id=config.access_tenant_id,
                 registration_enabled=config.customer_registration_enabled,
                 idle_minutes=config.customer_auth_idle_minutes,
                 absolute_hours=config.customer_auth_absolute_hours,
                 jwt_codec=jwt_codec,
             )
-            customer_conversation_repository = (
-                MySQLCustomerConversationRepository(
-                    cursor_secret=session_secret.encode("utf-8"))
-                if shared_conversations else CustomerConversationRepository(
-                    os.path.join(config.workspace, config.customer_data_database_path),
-                    cursor_secret=session_secret.encode("utf-8"),
-                )
-            )
-            if config.customer_long_term_memory_enabled:
-                customer_memory_service = CustomerMemoryService(
-                    _customer_memory_store(
-                        config,
-                        indexing_enabled=True,
-                    )
-                )
-                public_store = PublicApprovedMemoryStore(
-                    os.path.join(config.workspace, "workspace", "customer_memory", "public_memory.db")
-                )
-                public_store.import_approved_markdown(
-                    os.path.join(config.workspace, config.customer_memory_file)
-                )
-        customer_portal_channel = CustomerPortalChannel(
-            bus, host=config.customer_portal_host, port=config.customer_portal_port,
+        customer_portal = CustomerPortalChannel(
+            bus,
+            host=config.customer_portal_host,
+            port=config.customer_portal_port,
             identity_service=customer_identity_service,
-            conversation_repository=customer_conversation_repository,
+            conversation_repository=customer_conversations,
             memory_service=customer_memory_service,
+            handoff_service=customer_handoff_service,
         )
-        channels.append(customer_portal_channel)
+        channels.append(customer_portal)
         print(
-            f"[启动] 已启用独立客户门户: "
+            f"[启动] 已启用客户智能客服: "
             f"http://{config.customer_portal_host}:{config.customer_portal_port}"
         )
-    else:
-        print("[启动] 独立客户门户已禁用")
 
     memory_index_task = None
     workspace_memory_task = None
@@ -1075,11 +970,15 @@ async def async_main() -> None:
 
     # Email RFQ notifications are durable DB outbox messages, not Agent replies.
     email_config = load_email_config()
+    from agent.inquiry.config import InquirySettings
+    inquiry_settings = InquirySettings.from_env()
+    fixed_demo_mailbox_pause = (inquiry_settings.demo_mode and inquiry_settings.demo_prefer_fixtures
+                                and not inquiry_settings.demo_live_mailbox)
     notification_task = None
     smtp_delivery_task = None
     clarification_delivery_task = None
     managed_ingestion_task = None
-    if email_config.qq_notify_enabled:
+    if email_config.qq_notify_enabled and not fixed_demo_mailbox_pause:
         email_config.validate_qq_notification()
         if not (config.qq_app_id and config.qq_app_secret):
             raise ValueError("QQ notification requires NANOCLAW_QQ_APP_ID and NANOCLAW_QQ_APP_SECRET")
@@ -1102,30 +1001,51 @@ async def async_main() -> None:
 
         notification_task = asyncio.create_task(run_email_ingestion_and_notifications())
 
-    if email_config.managed_accounts_enabled:
-        managed_ingestion = ManagedEmailIngestionRuntime(email_config)
+    if email_config.managed_accounts_enabled and not fixed_demo_mailbox_pause:
+        try:
+            if inquiry_settings.enabled:
+                from agent.inquiry.mailbox import InquiryMailboxPoller
+                managed_ingestion = InquiryMailboxPoller()
+            else:
+                managed_ingestion = ManagedEmailIngestionRuntime(email_config)
+        except Exception as exc:
+            # A missing optional mailbox migration must not take down the
+            # customer portal, workspace, MCP tools or manual demo workflow.
+            managed_ingestion = None
+            print(f"[启动] 邮箱自动拉取未启动: {getattr(exc, 'code', type(exc).__name__)}")
 
-        async def run_managed_email_ingestion() -> None:
-            while True:
-                results = await managed_ingestion.poll_due()
-                for result in results:
-                    if result["status"] == "error":
-                        print(f"[ManagedEmail] 账户轮询失败: {result['error_code']}")
+        if managed_ingestion is not None:
+            async def run_managed_email_ingestion() -> None:
+                while True:
+                    try:
+                        results = await managed_ingestion.poll_due()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        print(f"[ManagedEmail] 邮箱轮询暂不可用: {getattr(exc, 'code', type(exc).__name__)}")
+                        await asyncio.sleep(max(1, min(email_config.managed_scan_seconds, 60)))
                         continue
-                    messages = result["messages"]
-                    accepted = sum(item.get("status") == "needs_review" for item in messages)
-                    ignored = sum(item.get("status") == "ignored_non_trade" for item in messages)
-                    if accepted or ignored:
-                        print(f"[ManagedEmail] 外贸询盘待审核={accepted} 非外贸跳过={ignored}")
-                await asyncio.sleep(max(1, min(email_config.managed_scan_seconds, 60)))
+                    for result in results:
+                        if result["status"] == "error":
+                            print(f"[ManagedEmail] 账户轮询失败: {result['error_code']}")
+                            continue
+                        messages = result["messages"]
+                        accepted = sum(item.get("status") == "needs_review" for item in messages)
+                        ignored = sum(item.get("status") == "ignored_non_trade" for item in messages)
+                        if accepted or ignored:
+                            print(f"[ManagedEmail] 外贸询盘待审核={accepted} 非外贸跳过={ignored}")
+                    await asyncio.sleep(max(1, min(email_config.managed_scan_seconds, 60)))
 
-        managed_ingestion_task = asyncio.create_task(run_managed_email_ingestion())
-        mode = "remote_llm" if email_config.remote_extraction_approved else "deterministic_local"
-        print(f"[启动] 已启用工作区邮箱自动外贸询盘解析: {mode}")
+            managed_ingestion_task = asyncio.create_task(run_managed_email_ingestion())
+            mode = ("model_with_local_fallback" if inquiry_settings.enabled else
+                    "remote_llm" if email_config.remote_extraction_approved else "deterministic_local")
+            print(f"[启动] 已启用客户邮件自动接收与背调入口: {mode}")
     else:
-        print("[启动] 工作区邮箱自动外贸询盘解析未启用")
+        print("[启动] 固定演示模式已暂停真实邮箱自动收件" if fixed_demo_mailbox_pause
+              else "[启动] 工作区邮箱自动外贸询盘解析未启用")
 
-    if (email_config.managed_accounts_enabled
+    from agent.inquiry.config import InquirySettings
+    if (not InquirySettings.from_env().enabled and email_config.managed_accounts_enabled
             and email_config.clarification_auto_reply_enabled):
         clarification_worker = create_default_clarification_delivery_worker(
             worker_id=f"rfq-clarification-{uuid.uuid4()}",
@@ -1163,10 +1083,13 @@ async def async_main() -> None:
             run_clarification_delivery()
         )
         print("[启动] 已启用缺失 RFQ 字段自动邮件提醒")
+    elif inquiry_settings.enabled and inquiry_settings.auto_clarify:
+        print("[启动] 已启用缺失 RFQ 字段自动邮件提醒: inquiry_workflow")
     else:
         print("[启动] 缺失 RFQ 字段自动邮件提醒未启用")
 
-    if config.email_smtp_worker_enabled:
+    from agent.inquiry.config import InquirySettings
+    if config.email_smtp_worker_enabled and not InquirySettings.from_env().enabled:
         smtp_worker = create_default_email_delivery_worker(
             worker_id=f"smtp-{uuid.uuid4()}",
             timeout_seconds=config.email_smtp_timeout_seconds,
@@ -1202,6 +1125,15 @@ async def async_main() -> None:
     else:
         print("[启动] 真实 SMTP 投递 Worker 未启用")
 
+    from agent.inquiry.config import InquirySettings
+    from agent.inquiry.runtime import InquiryWorker, default_service
+    inquiry_task = None
+    if InquirySettings.from_env().enabled:
+        inquiry_task = asyncio.create_task(
+            InquiryWorker(default_service(), mcp_manager=mcp_manager).run(),
+            name="inquiry-worker",
+        )
+
     # 预创建 CLI Agent，让初始化信息在启动时就显示
     cli_session_key = "cli:local"
     agent = create_agent(cli_session_key)
@@ -1216,6 +1148,9 @@ async def async_main() -> None:
     except KeyboardInterrupt:
         print("\n[NanoClaw] 正在退出...")
     finally:
+        if inquiry_task:
+            inquiry_task.cancel()
+            await asyncio.gather(inquiry_task, return_exceptions=True)
         if notification_task:
             notification_task.cancel()
             await asyncio.gather(notification_task, return_exceptions=True)

@@ -12,6 +12,7 @@ import json
 import sqlite3
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -20,6 +21,9 @@ from agent.business.email_account_repository import EmailAccountRepository
 from agent.business.email_account_service import EmailAccountService
 from agent.business.email_delivery_repository import EmailDeliveryRepository, canonical_quote_hash
 from agent.business.email_delivery_service import EmailDeliveryService
+from agent.business.email_quote_workflow import EmailQuoteWorkflowService
+from agent.business.email_repository import EmailRepository
+from agent.business.email_review_service import EmailReviewService
 from agent.business.email_secret_store import MemoryEmailSecretStore
 from agent.workflow import WorkflowService
 from bus import MessageBus
@@ -121,6 +125,8 @@ def _run_in_directory(root: Path, provider: str) -> dict:
         email_admin_token=_ADMIN_TOKEN,
         email_account_service=account_service,
         email_delivery_service=delivery_service,
+        email_review_service=EmailReviewService(EmailRepository(connection), "m5-local-reviewer"),
+        email_quote_workflow_service=EmailQuoteWorkflowService(connection),
     )
     channel._app = FastAPI(title="NanoClaw M5 local acceptance")
     channel._register_routes()
@@ -164,8 +170,11 @@ def _run_in_directory(root: Path, provider: str) -> dict:
             "approval_key": approval_key,
             "recipient": _RECIPIENT,
         }
-        queued_response = client.post("/api/email/deliveries", headers=headers, json=request)
-        duplicate_response = client.post("/api/email/deliveries", headers=headers, json=request)
+        # This runner explicitly validates the retired M5 queue in isolation;
+        # production keeps that queue closed when the inquiry workflow is on.
+        with patch.dict("os.environ", {"INQUIRY_WORKFLOW_ENABLED": "false"}):
+            queued_response = client.post("/api/email/deliveries", headers=headers, json=request)
+            duplicate_response = client.post("/api/email/deliveries", headers=headers, json=request)
         if queued_response.status_code != 200 or duplicate_response.status_code != 200:
             raise RuntimeError("m5_delivery_queue_failed")
         queued = queued_response.json()

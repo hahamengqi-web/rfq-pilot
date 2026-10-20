@@ -16,6 +16,7 @@ import pypdf
 from pypdf import PdfReader
 
 from ..config import PdfIngestionConfig, load_pdf_ingestion_config
+from ..text_normalization import normalize_search_text
 from ..contracts import (
     ParseResult,
     ParsedBlock,
@@ -56,7 +57,7 @@ def _check_deadline(deadline: float) -> None:
 def _normalize_text(value: str | None) -> str:
     if not value:
         return ""
-    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    text = normalize_search_text(value).replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("\x00", "").replace("\u00ad", "")
     text = _HYPHENATED_LINE_BREAK.sub("", text)
     lines = []
@@ -122,15 +123,63 @@ def _looks_complex_layout(page) -> bool:
     return column_rows >= 2
 
 
-def _extract_with_pdfplumber(payload: bytes, deadline: float) -> tuple[list[str], bool]:
+def _table_markdown(rows: list[list[str | None]]) -> tuple[str, bool]:
+    if not rows:
+        return "", True
+    width = len(rows[0])
+    # A single detected column has no row/column relationship to preserve.
+    # Leave its characters in the page body instead of forcing a vision table pass.
+    if width < 2:
+        return "", False
+    missing_body_cells = sum(cell is None for row in rows[1:] for cell in row)
+    body_cells = max(1, width * max(1, len(rows) - 1))
+    complex_table = (any(len(row) != width for row in rows)
+                     or any(cell is None for cell in rows[0])
+                     or missing_body_cells / body_cells > .2)
+    def cell_text(value: str | None) -> str:
+        return re.sub(r"\s*\n\s*", "<br>", str(value or "").strip()).replace("|", "\\|")
+    normalized = [[cell_text(value) for value in row] for row in rows]
+    if complex_table:
+        return "复杂表格待视觉解析", True
+    header = "| " + " | ".join(normalized[0]) + " |"
+    separator = "| " + " | ".join(["---"] * width) + " |"
+    body = ["| " + " | ".join(row) + " |" for row in normalized[1:]]
+    return "\n".join([header, separator, *body]), False
+
+
+def _extract_with_pdfplumber(payload: bytes, deadline: float) -> tuple[list[str], bool, list[list[dict]]]:
     pages: list[str] = []
     complex_layout = False
+    tables_by_page: list[list[dict]] = []
     with pdfplumber.open(BytesIO(payload)) as document:
         for page in document.pages:
             _check_deadline(deadline)
-            pages.append(page.extract_text(layout=True) or "")
-            complex_layout = _looks_complex_layout(page) or complex_layout
-    return pages, complex_layout
+            tables = []
+            try:
+                found = page.find_tables()
+            except Exception:
+                found = []
+            for table in found:
+                markdown, needs_vision = _table_markdown(table.extract() or [])
+                if not markdown:
+                    continue
+                tables.append({"text": markdown, "bbox": tuple(float(x) for x in table.bbox),
+                               "complex_table": needs_vision})
+            boxes = [row["bbox"] for row in tables]
+            if boxes:
+                def outside_tables(obj):
+                    if obj.get("object_type") != "char":
+                        return True
+                    x, top = float(obj.get("x0", 0)), float(obj.get("top", 0))
+                    return not any(left <= x <= right and upper <= top <= lower
+                                   for left, upper, right, lower in boxes)
+                body = page.filter(outside_tables).extract_text(layout=True) or ""
+            else:
+                body = page.extract_text(layout=True) or ""
+            pages.append(body)
+            tables_by_page.append(tables)
+            complex_layout = (_looks_complex_layout(page) and not tables) or complex_layout
+    return pages, complex_layout, tables_by_page
 
 
 def _extract_with_pypdf(reader: PdfReader, deadline: float) -> list[str]:
@@ -149,7 +198,7 @@ def _max_consecutive_blank(pages: list[str]) -> int:
     return longest
 
 
-def _blocks_from_pages(pages: list[str]) -> tuple[ParsedBlock, ...]:
+def _blocks_from_pages(pages: list[str], tables_by_page: list[list[dict]] | None = None) -> tuple[ParsedBlock, ...]:
     blocks: list[ParsedBlock] = []
     current_section: tuple[str, ...] = ()
     for page_number, page in enumerate(pages, 1):
@@ -169,6 +218,11 @@ def _blocks_from_pages(pages: list[str]) -> tuple[ParsedBlock, ...]:
                 block_type = ParsedBlockType.PARAGRAPH
             location = SourceLocation(page_number, page_number, current_section, block_type)
             blocks.append(ParsedBlock(text, location, len(blocks), {"page": page_number}))
+        for table in (tables_by_page or [[] for _ in pages])[page_number - 1]:
+            location = SourceLocation(page_number, page_number, current_section,
+                                      ParsedBlockType.TABLE, table["bbox"])
+            blocks.append(ParsedBlock(table["text"], location, len(blocks),
+                                      {"page": page_number, "complex_table": table["complex_table"]}))
     return tuple(blocks)
 
 
@@ -223,21 +277,24 @@ def _parse_pdf_bytes_in_process(
 
         warnings: list[PdfWarningCode] = []
         parser = "pdfplumber"
-        parser_version = f"pdfplumber-{pdfplumber.__version__}+pdf-v1"
+        parser_version = f"pdfplumber-{pdfplumber.__version__}+pdf-table-md-v2"
         try:
-            raw_pages, complex_layout = _extract_with_pdfplumber(payload, deadline)
+            raw_pages, complex_layout, tables_by_page = _extract_with_pdfplumber(payload, deadline)
         except PdfProcessingError:
             raise
         except Exception:
             raw_pages = _extract_with_pypdf(reader, deadline)
             complex_layout = False
+            tables_by_page = [[] for _ in raw_pages]
             parser = "pypdf"
             parser_version = f"pypdf-{pypdf.__version__}+pdf-v1"
             warnings.append(PdfWarningCode.FALLBACK_PARSER_USED)
 
         normalized = [_normalize_text(page) for page in raw_pages]
-        primary_chars = sum(len(page) for page in normalized)
-        primary_ratio = sum(bool(page) for page in normalized) / page_count
+        primary_chars = sum(len(page) + sum(len(row["text"]) for row in tables_by_page[index])
+                            for index, page in enumerate(normalized))
+        primary_ratio = sum(bool(page or tables_by_page[index])
+                            for index, page in enumerate(normalized)) / page_count
         if parser == "pdfplumber" and (
             len(normalized) != page_count
             or primary_chars == 0
@@ -247,6 +304,7 @@ def _parse_pdf_bytes_in_process(
                 fallback = [_normalize_text(page) for page in _extract_with_pypdf(reader, deadline)]
                 if sum(len(page) for page in fallback) > primary_chars:
                     normalized = fallback
+                    tables_by_page = [[] for _ in fallback]
                     parser = "pypdf"
                     parser_version = f"pypdf-{pypdf.__version__}+pdf-v1"
                     warnings.append(PdfWarningCode.FALLBACK_PARSER_USED)
@@ -257,7 +315,8 @@ def _parse_pdf_bytes_in_process(
 
         if len(normalized) != page_count:
             raise PdfProcessingError(PdfErrorCode.PARSE_FAILED)
-        raw_page_char_counts = tuple(len(page) for page in normalized)
+        raw_page_char_counts = tuple(len(page) + sum(len(row["text"]) for row in tables_by_page[index])
+                                     for index, page in enumerate(normalized))
         if any(count > config.max_chars_per_page for count in raw_page_char_counts):
             raise PdfProcessingError(PdfErrorCode.TEXT_LIMIT_EXCEEDED)
         if sum(raw_page_char_counts) > config.max_total_chars:
@@ -265,7 +324,8 @@ def _parse_pdf_bytes_in_process(
 
         normalized, boundary_warnings = _strip_repeated_boundaries(normalized)
         warnings.extend(boundary_warnings)
-        page_char_counts = tuple(len(page) for page in normalized)
+        page_char_counts = tuple(len(page) + sum(len(row["text"]) for row in tables_by_page[index])
+                                 for index, page in enumerate(normalized))
         if any(count > config.max_chars_per_page for count in page_char_counts):
             raise PdfProcessingError(PdfErrorCode.TEXT_LIMIT_EXCEEDED)
         text_chars = sum(page_char_counts)
@@ -289,7 +349,7 @@ def _parse_pdf_bytes_in_process(
         )
         status = ProcessingStatus.NEEDS_OCR if needs_ocr else ProcessingStatus.READY
         unique_warnings = tuple(dict.fromkeys(warnings))
-        blocks = _blocks_from_pages(normalized)
+        blocks = _blocks_from_pages(normalized, tables_by_page)
         _check_deadline(deadline)
         return ParseResult(
             parser=parser,

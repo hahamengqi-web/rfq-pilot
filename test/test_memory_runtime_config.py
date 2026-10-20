@@ -3,18 +3,24 @@ import pytest
 
 
 def test_memory_runtime_defaults_are_disabled(tmp_path, monkeypatch):
-    for name in (
+    disabled = (
         "NANOCLAW_CUSTOMER_AUTH_ENABLED",
         "NANOCLAW_CUSTOMER_REGISTRATION_ENABLED",
         "NANOCLAW_WORKSPACE_MEMORY_ENABLED",
+        "NANOCLAW_WORKSPACE_MEMORY_AUTO_EXTRACT_ENABLED",
+        "NANOCLAW_WORKSPACE_MEMORY_HYBRID_ENABLED",
+        "NANOCLAW_WORKSPACE_MEMORY_GOVERNANCE_ENABLED",
+        "NANOCLAW_WORKSPACE_MEMORY_REVIEW_ENABLED",
         "NANOCLAW_CUSTOMER_LONG_TERM_MEMORY_ENABLED",
+        "NANOCLAW_CUSTOMER_CONVERSATION_MEMORY_ENABLED",
         "NANOCLAW_WORKSPACE_CUSTOMER_MEMORY_READ_ENABLED",
-        "NANOCLAW_WORKSPACE_OPERATOR_ID",
-        "NANOCLAW_WORKSPACE_OPERATOR_TENANT_ID",
         "NANOCLAW_MEMORY_HYBRID_RETRIEVAL_ENABLED",
-        "NANOCLAW_MEMORY_EMBEDDING_BACKEND",
-    ):
-        monkeypatch.delenv(name, raising=False)
+    )
+    for name in disabled:
+        monkeypatch.setenv(name, "false")
+    monkeypatch.setenv("NANOCLAW_WORKSPACE_OPERATOR_ID", "")
+    monkeypatch.setenv("NANOCLAW_WORKSPACE_OPERATOR_TENANT_ID", "")
+    monkeypatch.setenv("NANOCLAW_MEMORY_EMBEDDING_BACKEND", "local_hash")
 
     config = load_config(str(tmp_path / "missing.json"))
 

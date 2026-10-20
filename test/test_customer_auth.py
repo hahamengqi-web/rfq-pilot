@@ -53,9 +53,9 @@ def test_customer_account_menu_button_uses_localized_text_label():
         page = client.get("/customer")
         assert page.status_code == 200
         assert page.headers["cache-control"] == "no-cache, must-revalidate"
-        assert "/static/customer-preview.js?v=20260827-1" in page.text
+        assert "/static/customer-preview.js?v=20261016-minimal" in page.text
         assert 'id="customerAccount" class="customer-account-button"' in page.text
-        assert '>客户登录</span></button>' in page.text
+        assert '>登录</span></button>' in page.text
         assert 'data-i18n="auth.loginButton"' in page.text
         assert 'class="customer-auth-dialog"' in page.text
         assert page.text.count('formmethod="dialog" formnovalidate value="cancel"') == 2
@@ -181,6 +181,7 @@ def test_authenticated_websocket_uses_server_account_and_rejects_other_owner():
                 "request_id": "00000000-0000-4000-8000-000000000001",
                 "language": "en", "content": "Need 100 units",
             })
+            assert websocket.receive_json()["type"] == "assistant.progress"
             assert websocket.receive_json()["type"] == "chat.duplicate"
             inbound = bus.inbound_queue.get_nowait()
         assert inbound.sender_id.startswith(f"account:{account_a['account_id']}:")

@@ -84,7 +84,8 @@ class PermissionAwareRagRetriever:
                 detail = self.repository.get_document(str(citation.get("document_id") or ""))
             except Exception:
                 return {"status": "NO_EVIDENCE", "answer": "", "citations": []}
-            if not self._document_visible(detail, context, normalized_skus):
+            if (not self._document_visible(detail, context, normalized_skus)
+                    or int(detail.get("version") or 0) != int(citation.get("version") or -1)):
                 return {"status": "NO_EVIDENCE", "answer": "", "citations": []}
             metadata = detail.get("metadata") if isinstance(detail.get("metadata"), dict) else {}
             tagged_skus = {
@@ -98,13 +99,8 @@ class PermissionAwareRagRetriever:
                 "location": str(citation.get("location") or ""),
                 "product_skus": sorted(tagged_skus),
             })
-        answer = str(result.get("answer") or "") if citations else ""
-        memory_rows = (
-            self.public_memory_store.search(query, top_k=3)
-            if self.public_memory_store is not None else []
-        )
-        if memory_rows:
-            answer = "\n".join([answer, *memory_rows]).strip()
+        answer = (str(result.get("answer") or "")
+                  if citations and result.get("status") == "ANSWERED" else "")
         return {
             "status": "ANSWERED" if answer else str(result.get("status") or "NO_EVIDENCE"),
             "answer": answer,

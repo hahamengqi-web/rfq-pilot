@@ -2,9 +2,9 @@ import unittest
 from trade_rag.contracts import Actor, CanonicalDocument, ChildChunk, DocumentStatus, SearchResult
 from trade_rag.hybrid import HybridRetriever
 
-def row(idx, score, source="semantic"):
-    child=ChildChunk(f"c{idx}",f"p{idx}","d",f"SKU-{idx} content","loc",f"h{idx}")
-    doc=CanonicalDocument("d",1,"sample://d","D","x","h",status=DocumentStatus.PUBLISHED)
+def row(idx, score, source="semantic", document_id="d"):
+    child=ChildChunk(f"c{idx}",f"p{idx}",document_id,f"SKU-{idx} content","loc",f"h{idx}")
+    doc=CanonicalDocument(document_id,1,f"sample://{document_id}","D","x","h",status=DocumentStatus.PUBLISHED)
     return SearchResult(child,score,doc,retrieval_source=source)
 
 class Store:
@@ -38,5 +38,22 @@ class HybridTests(unittest.TestCase):
         zero=HybridRetriever(Store(semantic),Store(keyword),Embedder(),semantic_weight=0).search("q",Actor("u"),10)
         one=HybridRetriever(Store(semantic),Store(keyword),Embedder(),semantic_weight=1).search("q",Actor("u"),10)
         self.assertEqual(zero[0].child.child_id,"c1"); self.assertEqual(one[0].child.child_id,"c0")
+
+    def test_document_scope_is_sent_to_backend_before_ranking(self):
+        class ScopedStore:
+            allowed = None
+            def search(self, value, actor, limit, allowed_document_ids=()):
+                self.allowed = set(allowed_document_ids)
+                rows = [row(0, .99, document_id="other"), row(1, .8, document_id="wanted")]
+                return [item for item in rows if item.source.document_id in self.allowed][:limit]
+
+        semantic = ScopedStore()
+        keyword = ScopedStore()
+        result = HybridRetriever(semantic, keyword, Embedder()).search(
+            "q", Actor("u"), 1, allowed_document_ids={"wanted"},
+        )
+        self.assertEqual(semantic.allowed, {"wanted"})
+        self.assertEqual(keyword.allowed, {"wanted"})
+        self.assertEqual(result[0].source.document_id, "wanted")
 
 if __name__ == "__main__": unittest.main()

@@ -153,3 +153,4 @@ class OpenAICompatProvider(LLMProvider):
                 content=sanitize_text(f"错误: API 调用失败 - {e}"),
                 finish_reason="error",
             )
+

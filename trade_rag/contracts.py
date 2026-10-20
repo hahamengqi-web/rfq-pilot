@@ -244,8 +244,13 @@ class QueryRequest:
     actor: Actor
     top_n: int = 30
     top_k: int = 8
+    rewrite: bool = True
     rerank: bool = True
     history: tuple["HistoryMessage", ...] = ()
+    # Restrict customer retrieval to documents declared for a known model.
+    # This is applied before reranking so a passage for another product cannot
+    # win merely because it contains the requested feature name.
+    allowed_document_ids: tuple[str, ...] = ()
     # Evaluation traces may contain retrieved source text.  They are therefore
     # opt-in and must never be returned by customer-facing adapters.
     evaluation_mode: bool = False

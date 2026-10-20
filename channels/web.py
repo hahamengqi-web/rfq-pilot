@@ -5,6 +5,7 @@ import hashlib
 from datetime import datetime, timezone
 import json
 import os
+import re
 import secrets
 import uuid
 from dataclasses import asdict
@@ -59,6 +60,7 @@ from config import load_config
 from agent.access_control.identity import IdentityError, IdentityService
 from agent.access_control.jwt import JWTError
 from channels.access_auth_api import bearer_token, create_access_auth_router
+from agent.customer_service.handoffs import CustomerHandoffService, HandoffError
 
 
 def create_app() -> FastAPI:
@@ -87,7 +89,8 @@ class WebChannel(Channel):
                  workspace_memory_router=None, *, channel_name: str = "web",
                  root_page: str = "workspace",
                  access_service: IdentityService | None = None,
-                 access_control_enabled: bool = False):
+                 access_control_enabled: bool = False,
+                 customer_handoff_service: CustomerHandoffService | None = None):
         """初始化 Web 渠道。
 
         Args:
@@ -95,7 +98,7 @@ class WebChannel(Channel):
             host: 监听地址
             port: 监听端口
         """
-        if root_page not in {"landing", "workspace"}:
+        if root_page not in {"landing", "workspace", "internal"}:
             raise ValueError("web_root_page_invalid")
         super().__init__(name=channel_name, bus=bus)
         self.host = host
@@ -114,6 +117,7 @@ class WebChannel(Channel):
         self._workspace_memory_router = workspace_memory_router
         self._access_service = access_service
         self._access_control_enabled = access_control_enabled
+        self._customer_handoff_service = customer_handoff_service
         if access_control_enabled and access_service is None:
             raise ValueError("access_control_service_required")
         self._conversation_service = conversation_service or ConversationService()
@@ -224,9 +228,12 @@ class WebChannel(Channel):
         @self._app.get("/")
         async def index():
             """返回 Web UI 页面。"""
-            index_path = ui_dir / (
-                "landing.html" if self.root_page == "landing" else "index.html"
-            )
+            page_names = {
+                "landing": "landing.html",
+                "workspace": "index.html",
+                "internal": "inquiries.html",
+            }
+            index_path = ui_dir / page_names[self.root_page]
             if index_path.exists():
                 return FileResponse(
                     index_path, media_type="text/html",
@@ -244,8 +251,7 @@ class WebChannel(Channel):
 
         @self._app.get("/customer")
         async def customer_portal():
-            page = ui_dir / "customer.html"
-            return FileResponse(page, media_type="text/html") if page.exists() else HTMLResponse("<h1>customer.html not found</h1>", status_code=404)
+            raise HTTPException(status_code=410, detail="customer_agent_removed")
 
         @self._app.get("/product")
         async def product_page():
@@ -254,6 +260,7 @@ class WebChannel(Channel):
 
         @self._app.get("/api/ui/config")
         async def ui_config(request: Request):
+            from agent.inquiry.config import InquirySettings
             if self._customer_portal_public_url:
                 customer_url = self._customer_portal_public_url
             else:
@@ -264,6 +271,9 @@ class WebChannel(Channel):
             return {
                 "customer_portal_enabled": self._customer_portal_enabled,
                 "customer_portal_url": customer_url if self._customer_portal_enabled else None,
+                "demo_mode": InquirySettings.from_env().demo_mode,
+                "demo_fixed_data": InquirySettings.from_env().demo_prefer_fixtures,
+                "demo_live_mailbox": InquirySettings.from_env().demo_live_mailbox,
             }
 
         async def bounded_upload(request: Request, max_bytes: int) -> bytes:
@@ -326,6 +336,107 @@ class WebChannel(Channel):
                         status_code=403,
                         detail=EmailAdminErrorCode.ORIGIN_FORBIDDEN.value,
                     )
+
+        from agent.inquiry.config import InquirySettings
+        from agent.access_control.models import Principal
+        from channels.inquiry_api import create_inquiry_router
+
+        def inquiry_actor(request: Request):
+            origin = request.headers.get("origin")
+            if origin and origin.rstrip("/") != f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}":
+                raise HTTPException(403, "inquiry_origin_forbidden")
+            if self._access_control_enabled:
+                principal = getattr(request.state, "principal", None)
+                if principal is None:
+                    raise HTTPException(401, "authentication_required")
+                if principal.tenant_id != InquirySettings.from_env().tenant_id:
+                    raise HTTPException(403, "inquiry_tenant_not_configured")
+                return principal
+            require_email_admin(request)
+            return Principal("local-business-operator", InquirySettings.from_env().tenant_id,
+                             "local-business-operator", frozenset({"admin"}))
+
+        if InquirySettings.from_env().enabled:
+            self._app.include_router(create_inquiry_router(inquiry_actor))
+
+        @self._app.get("/inquiries")
+        async def inquiry_workspace():
+            return FileResponse(ui_dir / "inquiries.html", headers={"Cache-Control": "no-store"})
+
+        def support_operator(request: Request) -> str:
+            principal = inquiry_actor(request)
+            return str(getattr(principal, "user_id", None)
+                       or getattr(principal, "actor_id", None)
+                       or "workspace-operator")[:120]
+
+        def handoff_error(exc: HandoffError) -> None:
+            code = str(exc)
+            status = 404 if code == "handoff_not_found" else (
+                409 if code in {
+                    "handoff_already_completed", "handoff_already_claimed",
+                    "handoff_concurrent_update",
+                } else 400
+            )
+            raise HTTPException(status_code=status, detail=code) from exc
+
+        @self._app.get("/api/customer-support/handoffs")
+        async def list_customer_handoffs(
+                request: Request, status: str = "",
+                limit: int = Query(100, ge=1, le=200)):
+            support_operator(request)
+            if self._customer_handoff_service is None:
+                raise HTTPException(503, "customer_handoff_service_unavailable")
+            try:
+                items = await self._customer_handoff_service.list(
+                    status=status, limit=limit,
+                )
+                counts = {key: 0 for key in (
+                    "pending", "assigned", "replied", "completed",
+                )}
+                counts["overdue"] = 0
+                for item in await self._customer_handoff_service.list(limit=200):
+                    if item.get("status") in counts:
+                        counts[item["status"]] += 1
+                    if item.get("first_response_sla") == "overdue":
+                        counts["overdue"] += 1
+                return {"items": items, "counts": counts, "total": sum(counts.values())}
+            except HandoffError as exc:
+                handoff_error(exc)
+
+        @self._app.post("/api/customer-support/handoffs/{handoff_id}/claim")
+        async def claim_customer_handoff(handoff_id: str, request: Request):
+            operator = support_operator(request)
+            if self._customer_handoff_service is None:
+                raise HTTPException(503, "customer_handoff_service_unavailable")
+            try:
+                return await self._customer_handoff_service.claim(handoff_id, operator)
+            except HandoffError as exc:
+                handoff_error(exc)
+
+        @self._app.post("/api/customer-support/handoffs/{handoff_id}/reply")
+        async def reply_customer_handoff(handoff_id: str, request: Request):
+            operator = support_operator(request)
+            if self._customer_handoff_service is None:
+                raise HTTPException(503, "customer_handoff_service_unavailable")
+            payload = await request.json()
+            message = str(payload.get("message") or "") if isinstance(payload, dict) else ""
+            complete = bool(payload.get("complete")) if isinstance(payload, dict) else False
+            try:
+                return await self._customer_handoff_service.reply(
+                    handoff_id, operator, message, complete=complete,
+                )
+            except HandoffError as exc:
+                handoff_error(exc)
+
+        @self._app.post("/api/customer-support/handoffs/{handoff_id}/complete")
+        async def complete_customer_handoff(handoff_id: str, request: Request):
+            operator = support_operator(request)
+            if self._customer_handoff_service is None:
+                raise HTTPException(503, "customer_handoff_service_unavailable")
+            try:
+                return await self._customer_handoff_service.complete(handoff_id, operator)
+            except HandoffError as exc:
+                handoff_error(exc)
 
         def require_rag_observer(request: Request) -> None:
             client_host = (request.client.host if request.client else "").split("%", 1)[0]
@@ -442,6 +553,40 @@ class WebChannel(Channel):
             """Public, non-secret provider metadata used by the future M2 UI."""
             return public_provider_contract()
 
+        @self._app.get("/api/email/workflow")
+        async def workflow_email(request: Request):
+            """Show email handled by the active inquiry workflow, not the retired SQLite queue."""
+            principal = inquiry_actor(request)
+            from agent.inquiry.runtime import default_service
+
+            repository = default_service().repo
+            with repository.tx() as tx:
+                rows = tx.all("""SELECT m.message_id,m.inquiry_id,m.payload_json,m.created_at,c.state
+                    FROM inquiry_message m LEFT JOIN inquiry_case c
+                    ON c.inquiry_id=m.inquiry_id AND c.tenant_id=m.tenant_id
+                    WHERE m.tenant_id=? AND m.channel='email'
+                    ORDER BY m.created_at DESC LIMIT 100""", (principal.tenant_id,))
+                totals = tx.one("""SELECT COUNT(*) AS total FROM inquiry_message
+                    WHERE tenant_id=? AND channel='email'""", (principal.tenant_id,))
+                states = tx.all("""SELECT c.state,COUNT(DISTINCT c.inquiry_id) AS total
+                    FROM inquiry_case c JOIN inquiry_message m
+                    ON m.inquiry_id=c.inquiry_id AND m.tenant_id=c.tenant_id
+                    WHERE c.tenant_id=? AND m.channel='email' GROUP BY c.state""",
+                    (principal.tenant_id,))
+            items = []
+            for row in rows:
+                payload = json.loads(row["payload_json"])
+                items.append({
+                    "message_id": row["message_id"], "inquiry_id": row["inquiry_id"],
+                    "subject": payload.get("subject") or "（无主题）",
+                    "sender": payload.get("sender") or "",
+                    "received_at": payload.get("received_at") or row["created_at"],
+                    "state": row["state"] or "ignored",
+                    "ignored": bool(payload.get("ignored")),
+                })
+            counts = {row["state"]: int(row["total"]) for row in states}
+            return {"items": items, "total": int(totals["total"]), "states": counts}
+
         @self._app.get("/api/email/accounts")
         async def email_accounts(request: Request):
             require_email_admin(request)
@@ -551,7 +696,13 @@ class WebChannel(Channel):
         async def sendable_email_quotes(request: Request):
             require_email_admin(request)
             try:
-                return {"items": quote_workflow_service().list_work_items(request.query_params.get("limit", 100))}
+                limit = request.query_params.get("limit", 100)
+                items = quote_workflow_service().list_work_items(limit)
+                if not items:
+                    # Preserve read compatibility for approved legacy quotes
+                    # while the inquiry workflow owns all new writes.
+                    items = delivery_service().list_sendable_quotes(limit)
+                return {"items": items}
             except Exception as exc:
                 email_quote_workflow_error(exc)
 
@@ -586,6 +737,10 @@ class WebChannel(Channel):
         async def create_email_delivery(request: Request):
             require_email_admin(request)
             payload = await email_json(request)
+            allowed = {"account_id", "quote_id", "quote_version", "approval_key",
+                       "recipient", "max_attempts"}
+            if set(payload) - allowed:
+                raise HTTPException(status_code=400, detail="email_invalid_delivery_request")
             try:
                 return delivery_service().queue(payload)
             except Exception as exc:
@@ -640,6 +795,15 @@ class WebChannel(Channel):
         @self._app.get("/api/email/runtime")
         async def email_runtime(request: Request):
             require_email_admin(request)
+            inquiry_settings = InquirySettings.from_env()
+            fixed_demo_mailbox_pause = (inquiry_settings.demo_mode and inquiry_settings.demo_prefer_fixtures
+                                        and not inquiry_settings.demo_live_mailbox)
+            accounts = account_service().list_accounts()
+            ready_inbound_accounts = sum(
+                bool(item["inbound_enabled"] and item["credential_configured"]
+                     and item["status"] in {"healthy", "degraded", "validating"})
+                for item in accounts
+            )
             return {
                 "smtp_worker_enabled": self._email_smtp_worker_enabled,
                 "smtp_transport": "smtp_ssl" if self._email_smtp_worker_enabled else "disabled",
@@ -647,9 +811,15 @@ class WebChannel(Channel):
                 "quote_queue_requires_explicit_operator": True,
                 "clarification_auto_reply_enabled": self._email_clarification_auto_reply_enabled,
                 "agent_smtp_tool_registered": False,
-                "managed_ingestion_enabled": self._email_managed_ingestion_enabled,
-                "inbound_scope": "foreign_trade_rfq_only",
+                "managed_ingestion_enabled": self._email_managed_ingestion_enabled and not fixed_demo_mailbox_pause,
+                "managed_ingestion_paused_for_demo": fixed_demo_mailbox_pause,
+                "ready_inbound_accounts": ready_inbound_accounts,
+                "inquiry_workflow_enabled": inquiry_settings.enabled,
+                "inquiry_smtp_enabled": inquiry_settings.smtp_enabled,
+                "inquiry_demo_mode": inquiry_settings.demo_mode,
+                "inbound_scope": "customer_email_research",
                 "extraction_mode": (
+                    "model_with_local_fallback" if inquiry_settings.enabled else
                     "remote_llm" if self._email_remote_extraction_approved else "deterministic_local"
                 ),
             }
@@ -810,11 +980,21 @@ class WebChannel(Channel):
                         self._knowledge_repository.index_image,
                         result["document_id"], index_document=self._knowledge_pipeline.index,
                     )
+                elif (result.get("content_type") != "application/pdf"
+                      and not str(result.get("content_type", "")).startswith("image/")
+                      and result.get("status") == "published"
+                      and result.get("index_status") in {"pending", "ready", "failed"}):
+                    result = await asyncio.to_thread(
+                        self._knowledge_repository.index_text,
+                        result["document_id"], index_document=self._knowledge_pipeline.index,
+                    )
                 result["duplicate"] = duplicate
             except ValueError as exc:
                 code = str(exc)
                 status = 413 if code == "file_too_large" else 400
                 raise HTTPException(status_code=status, detail=code) from exc
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="knowledge_index_failed") from exc
             return {
                 "document_id": result["document_id"],
                 "name": result["original_name"],
@@ -873,13 +1053,72 @@ class WebChannel(Channel):
                         self._knowledge_repository.index_image,
                         document_id, index_document=self._knowledge_pipeline.index,
                     )
+                elif (result.get("content_type") != "application/pdf"
+                      and not str(result.get("content_type", "")).startswith("image/")
+                      and result.get("status") == "published"
+                      and result.get("chunk_status") == "ready"):
+                    result = await asyncio.to_thread(
+                        self._knowledge_repository.index_text,
+                        document_id, index_document=self._knowledge_pipeline.index,
+                    )
                 return {"document_id": document_id, "classification": result["classification"]}
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except (ValueError, AttributeError, TypeError) as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RuntimeError as exc:
+            except Exception as exc:
                 raise HTTPException(status_code=500, detail="knowledge_index_failed") from exc
+
+        @self._app.patch("/api/knowledge/documents/{document_id}/metadata")
+        async def update_knowledge_document_metadata(document_id: str, request: Request):
+            """Save operator-reviewed retrieval metadata and rebuild the index."""
+            require_feature(self._knowledge_admin_enabled, "knowledge_admin_disabled")
+            try:
+                payload = await request.json()
+                product_models = payload.get("product_models")
+                if isinstance(product_models, str):
+                    product_models = [
+                        value.strip() for value in re.split(r"[,，;；\n]+", product_models)
+                        if value.strip()
+                    ]
+                if not isinstance(product_models, list):
+                    raise ValueError("invalid_knowledge_product_models")
+                before = await asyncio.to_thread(
+                    self._knowledge_repository.get_document, document_id,
+                )
+                result = await asyncio.to_thread(
+                    self._knowledge_repository.set_document_metadata,
+                    document_id,
+                    document_type=str(payload.get("document_type") or ""),
+                    document_version=str(payload.get("document_version") or ""),
+                    product_models=product_models,
+                    logical_document_key=str(payload.get("logical_document_key") or ""),
+                )
+                if before.get("index_status") == "indexed":
+                    await asyncio.to_thread(
+                        self._knowledge_pipeline.delete_by_document,
+                        document_id, int(before.get("version", 1)),
+                    )
+                    content_type = str(result.get("content_type") or "")
+                    if content_type == "application/pdf":
+                        self._pdf_ingestion_coordinator().enqueue(document_id)
+                    elif content_type.startswith("image/"):
+                        result = await asyncio.to_thread(
+                            self._knowledge_repository.index_image,
+                            document_id, index_document=self._knowledge_pipeline.index,
+                        )
+                    else:
+                        result = await asyncio.to_thread(
+                            self._knowledge_repository.index_text,
+                            document_id, index_document=self._knowledge_pipeline.index,
+                        )
+                return public_document_record(result)
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail="knowledge_metadata_update_failed") from exc
 
         @self._app.get("/api/knowledge/documents")
         async def list_knowledge_documents(search: str = "", status: str = "",

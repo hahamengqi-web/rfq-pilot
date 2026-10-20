@@ -276,6 +276,9 @@ def test_m4_api_is_protected_and_m3_list_is_available(tmp_path: Path):
 def test_real_smtp_runtime_status_is_protected_and_environment_controlled(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("NANOCLAW_EMAIL_SMTP_WORKER_ENABLED", "true")
     monkeypatch.setenv("NANOCLAW_EMAIL_CLARIFICATION_AUTO_REPLY_ENABLED", "false")
+    monkeypatch.setenv("INQUIRY_WORKFLOW_ENABLED", "false")
+    monkeypatch.setenv("INQUIRY_SMTP_ENABLED", "false")
+    monkeypatch.setenv("DEMO_MODE", "false")
     service, _, connection, _ = build_service()
     channel = WebChannel(
         MessageBus(), conversation_service=ConversationService(tmp_path / "sessions"),
@@ -288,7 +291,13 @@ def test_real_smtp_runtime_status_is_protected_and_environment_controlled(tmp_pa
         assert client.get("/api/email/runtime").status_code == 401
         response = client.get("/api/email/runtime", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert {key: payload[key] for key in (
+        "smtp_worker_enabled", "smtp_transport", "queue_requires_explicit_operator",
+        "quote_queue_requires_explicit_operator", "clarification_auto_reply_enabled",
+        "agent_smtp_tool_registered", "managed_ingestion_enabled", "inbound_scope",
+        "extraction_mode",
+    )} == {
         "smtp_worker_enabled": True,
         "smtp_transport": "smtp_ssl",
         "queue_requires_explicit_operator": True,
@@ -296,9 +305,13 @@ def test_real_smtp_runtime_status_is_protected_and_environment_controlled(tmp_pa
         "clarification_auto_reply_enabled": False,
         "agent_smtp_tool_registered": False,
         "managed_ingestion_enabled": True,
-        "inbound_scope": "foreign_trade_rfq_only",
+        "inbound_scope": "customer_email_research",
         "extraction_mode": "deterministic_local",
     }
+    assert payload["managed_ingestion_paused_for_demo"] is False
+    assert payload["inquiry_workflow_enabled"] is False
+    assert payload["inquiry_smtp_enabled"] is False
+    assert payload["inquiry_demo_mode"] is False
 
 
 def test_delivery_runtime_batch_stops_when_queue_is_idle():

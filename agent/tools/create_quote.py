@@ -61,6 +61,10 @@ def create_quote_version_impl(
     Returns:
         报价单结果
     """
+    from agent.inquiry.config import InquirySettings
+    if InquirySettings.from_env().enabled:
+        return json.dumps({"error": "inquiry_workflow_required", "message": "请在询盘工作台完成审核和报价。"}, ensure_ascii=False)
+
     # 验证询盘存在
     rfq = get_rfq(rfq_id)
     if not rfq:

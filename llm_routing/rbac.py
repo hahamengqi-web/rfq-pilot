@@ -10,7 +10,7 @@ from .contracts import AgentRoute, RouteError
 
 
 DEFAULT_ROLE_ROUTES: dict[str, frozenset[AgentRoute]] = {
-    "customer": frozenset({AgentRoute.CUSTOMER_PRODUCT_CONSULTATION}),
+    "customer": frozenset(),
     "sales": frozenset({
         AgentRoute.INTERNAL_QUOTE_REPLY,
     }),

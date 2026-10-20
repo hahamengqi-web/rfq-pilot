@@ -4,7 +4,8 @@ from .config import RagVectorConfig, load_rag_vector_config
 from .stores import InMemoryVectorStore, VectorStore
 
 
-def create_vector_store(config: RagVectorConfig | None = None) -> VectorStore:
+def create_vector_store(config: RagVectorConfig | None = None,
+                        *, model_id: str | None = None) -> VectorStore:
     """Create the configured store without silently falling back on failures."""
     current = config or load_rag_vector_config()
     current.validate()
@@ -22,6 +23,6 @@ def create_vector_store(config: RagVectorConfig | None = None) -> VectorStore:
     else:
         # Milvus and its transitive SDK dependencies remain opt-in.
         from .milvus_store import MilvusStore
-        store = MilvusStore(current)
+        store = MilvusStore(current, model_id=model_id or "mock-hash-v1")
     store.check_ready()
     return store

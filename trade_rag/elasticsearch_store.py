@@ -62,6 +62,7 @@ class ElasticsearchKeywordStore:
             base_url=config.url,
             auth=(config.username, config.password),
             timeout=config.timeout_seconds,
+            trust_env=False,
             headers={"Accept": "application/json"},
         )
         self._index_ready = False
@@ -151,7 +152,8 @@ class ElasticsearchKeywordStore:
             choices.append({"terms": {"allowed_roles": sorted(actor.roles)}})
         return {"bool": {"should": choices, "minimum_should_match": 1}}
 
-    def search(self, query: str, actor: Actor, limit: int = 30) -> list[SearchResult]:
+    def search(self, query: str, actor: Actor, limit: int = 30,
+               allowed_document_ids=()) -> list[SearchResult]:
         if not query.strip():
             return []
         if limit <= 0 or limit > 1000:
@@ -171,6 +173,8 @@ class ElasticsearchKeywordStore:
                     "filter": [
                         {"term": {"business_unit_id": actor.business_unit_id}},
                         {"terms": {"document_status": ["approved", "published"]}},
+                        *([{"terms": {"document_id": sorted(set(allowed_document_ids))}}]
+                          if allowed_document_ids else []),
                         *([{"term": {"classification": "public"}}]
                           if "customer" in actor.roles else []),
                         self._role_filter(actor),

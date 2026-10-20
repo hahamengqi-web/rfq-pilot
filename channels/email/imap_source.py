@@ -48,6 +48,7 @@ class ImapSettings:
     port: int = 993
     folder: str = "INBOX"
     timeout_seconds: float = 30.0
+    prefer_recent_on_first_poll: bool = False
 
     def resolved_host(self) -> str:
         host = self.host or IMAP_PRESETS.get(self.provider, "")
@@ -110,10 +111,15 @@ class ImapEmailSource:
             if not response:
                 raise ImapOperationError("imap_uidvalidity_missing")
             self.uidvalidity = int(response[0])
+            expected = getattr(self, "expected_uidvalidity", 0)
+            if expected and expected != self.uidvalidity:
+                last_uid = 0
             status, data = client.uid("search", None, f"UID {last_uid + 1}:*")
             if status != "OK":
                 raise ImapOperationError(_imap_error_code("search", data))
-            uids = [int(value) for value in (data[0] or b"").split()][:limit]
+            all_uids = [int(value) for value in (data[0] or b"").split()]
+            uids = (all_uids[-limit:] if last_uid == 0 and self.settings.prefer_recent_on_first_poll
+                    else all_uids[:limit])
             result = []
             for uid in uids:
                 status, rows = client.uid("fetch", str(uid), "(BODY.PEEK[])")

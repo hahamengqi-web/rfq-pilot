@@ -6,7 +6,7 @@ import pytest
 from trade_rag.contracts import Actor, QueryRequest
 from trade_rag.knowledge_repository import KnowledgeRepository
 from trade_rag.pipeline import RagPipeline
-from trade_rag.stores import InMemoryKeywordStore
+from trade_rag.stores import InMemoryKeywordStore, InMemoryVectorStore
 
 from pdf_fixture_factory import build_fixture
 
@@ -27,7 +27,7 @@ def _import_table(repository: KnowledgeRepository):
 def test_pdf_atomic_index_counts_parent_semantic_and_keyword_and_uses_parent_context(tmp_path):
     repository = KnowledgeRepository(tmp_path / "knowledge")
     imported = _import_table(repository)
-    pipeline = RagPipeline()
+    pipeline = RagPipeline(store=InMemoryVectorStore())
 
     indexed = repository.index_pdf(imported["document_id"], index_prepared=pipeline.index_prepared)
     assert indexed["index_status"] == "indexed"
@@ -62,12 +62,12 @@ def test_three_store_index_failure_rolls_back_and_repository_retry_recovers(tmp_
         repository.index_pdf(imported["document_id"], index_prepared=failing.index_prepared)
     failed = repository.get_document(imported["document_id"])
     assert failed["index_status"] == "failed" and failed["indexed_count"] == 0
-    assert failed["last_error_code"] == "knowledge_index_failed"
+    assert failed["last_error_code"] == "knowledge_index_runtime_error"
     assert failing.store._entries == {}
     assert failing.keyword_store._entries == {}
     assert failing.parent_store._entries == {}
 
-    healthy = RagPipeline()
+    healthy = RagPipeline(store=InMemoryVectorStore())
     recovered = repository.retry_index(
         imported["document_id"], index_document=healthy.index_prepared
     )
