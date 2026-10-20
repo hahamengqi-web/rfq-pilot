@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS ops_email_account (
   inbound_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   outbound_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   poll_seconds INT UNSIGNED NOT NULL DEFAULT 60,
-  sender_name VARCHAR(80) NOT NULL DEFAULT 'NanoClaw Sales',
+  sender_name VARCHAR(80) NOT NULL DEFAULT 'RFQPilot Sales',
   allowed_senders_json JSON NOT NULL,
   allowed_recipients_json JSON NOT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'disabled',

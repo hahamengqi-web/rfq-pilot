@@ -1,4 +1,4 @@
-"""Thin NanoClaw adapter for the standalone employee LangGraph runtime."""
+"""Thin RFQPilot adapter for the standalone employee LangGraph runtime."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from providers.base import ToolCallRequest
 
 
 class NanoClawEmployeeAgentAdapter(AgentLoop):
-    """Expose an independent LangGraph employee Agent through NanoClaw's Gateway API."""
+    """Expose an independent LangGraph employee Agent through RFQPilot's Gateway API."""
 
     def __init__(
         self, *args: Any,

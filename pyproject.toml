@@ -1,7 +1,7 @@
 [project]
-name = "nanoclaw"
+name = "rfq-pilot"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-assisted foreign trade inquiry, research, quotation, and approval workspace"
 readme = "README.md"
 requires-python = "==3.11.9"
 dependencies = [

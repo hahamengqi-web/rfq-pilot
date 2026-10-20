@@ -63,7 +63,7 @@ def build_client(tmp_path: Path, product="USB-C Cable 1m"):
         "account_id": account_id, "display_name": "Sales", "provider": "qq",
         "address": "sales@qq.com", "secret_ref": f"email-account/{account_id}", "folder": "INBOX",
         "inbound_enabled": True, "outbound_enabled": True, "poll_seconds": 60,
-        "sender_name": "NanoClaw Sales", "allowed_senders": [],
+        "sender_name": "RFQPilot Sales", "allowed_senders": [],
         "allowed_recipients": ["buyer@example.test"], "status": "healthy",
     }, actor="test")
     workflow = EmailQuoteWorkflowService(connection)

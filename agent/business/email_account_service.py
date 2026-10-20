@@ -129,7 +129,7 @@ class EmailAccountService:
         display_name = str(merged.get("display_name", "")).strip()
         if not 1 <= len(display_name) <= 50:
             raise EmailAccountServiceError("email_invalid_display_name")
-        sender_name = str(merged.get("sender_name", "NanoClaw Sales")).strip()
+        sender_name = str(merged.get("sender_name", "RFQPilot Sales")).strip()
         if not sender_name or len(sender_name) > 80 or "\r" in sender_name or "\n" in sender_name:
             raise EmailAccountServiceError("email_invalid_sender_name")
         try:
@@ -287,7 +287,7 @@ class EmailAccountService:
             "display_name": "Legacy environment mailbox", "provider": config.provider,
             "address": config.address, "auth_code": config.auth_code,
             "inbound_enabled": bool(config.enabled), "outbound_enabled": False,
-            "poll_seconds": config.poll_seconds, "sender_name": "NanoClaw Sales",
+            "poll_seconds": config.poll_seconds, "sender_name": "RFQPilot Sales",
             "allowed_senders": [], "allowed_recipients": [],
         }
         values = self._validate(payload)
@@ -332,7 +332,7 @@ def _map_repository_error(exc: EmailAccountRepositoryError) -> EmailAccountServi
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="NanoClaw mailbox account maintenance")
+    parser = argparse.ArgumentParser(description="RFQPilot mailbox account maintenance")
     parser.add_argument("--migrate-legacy", action="store_true",
                         help="explicitly migrate the legacy NANOCLAW_EMAIL_* account into M1 storage")
     args = parser.parse_args()

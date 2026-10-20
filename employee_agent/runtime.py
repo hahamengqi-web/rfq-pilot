@@ -1,4 +1,4 @@
-"""Framework-only LangGraph runtime, independent of NanoClaw business modules."""
+"""Framework-only LangGraph runtime, independent of RFQPilot business modules."""
 
 from __future__ import annotations
 

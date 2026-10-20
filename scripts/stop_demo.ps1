@@ -21,4 +21,4 @@ foreach ($ownerId in @($listeners | Select-Object -ExpandProperty OwningProcess 
         Stop-ProcessTree ([int]$process.ProcessId)
     }
 }
-Write-Host "NanoClaw 演示应用已停止。数据库容器继续保留，避免下次启动重新初始化。"
+Write-Host "RFQPilot 演示应用已停止。数据库容器继续保留，避免下次启动重新初始化。"

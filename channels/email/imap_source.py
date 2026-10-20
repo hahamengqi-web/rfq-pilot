@@ -15,7 +15,7 @@ from .mime_parser import EmailParseLimits, parse_email
 
 IMAP_PRESETS = {"qq": "imap.qq.com", "netease_163": "imap.163.com", "netease_126": "imap.126.com"}
 NETEASE_PROVIDERS = {"netease_163", "netease_126"}
-NETEASE_CLIENT_ID = '("name" "NanoClaw" "version" "0.1.0" "vendor" "NanoClaw")'
+NETEASE_CLIENT_ID = '("name" "RFQPilot" "version" "0.1.0" "vendor" "RFQPilot")'
 
 
 class ImapOperationError(RuntimeError):

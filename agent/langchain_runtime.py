@@ -1,4 +1,4 @@
-"""Small LangChain adapter for NanoClaw's existing OpenAI-compatible provider."""
+"""Small LangChain adapter for RFQPilot's existing OpenAI-compatible provider."""
 
 from __future__ import annotations
 

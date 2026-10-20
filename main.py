@@ -1,5 +1,5 @@
 """
-NanoClaw 入口文件
+RFQPilot 入口文件
 
 提供命令行交互界面，组装 Agent 各组件并启动对话循环。
 
@@ -486,7 +486,7 @@ def build_agent(config, session_key: str, mcp_manager: MCPClientManager = None,
         token_budget=16000
     )
 
-    # 独立员工 Agent runtime 负责 LangGraph 编排与可恢复断点；NanoClaw
+    # 独立员工 Agent runtime 负责 LangGraph 编排与可恢复断点；RFQPilot
     # 只在这一层提供渠道、权限、会话、工具和记忆生命周期适配。
     employee_agent_settings = EmployeeAgentSettings.from_environment(config.workspace)
     agent = NanoClawEmployeeAgentAdapter(
@@ -655,7 +655,7 @@ async def async_main() -> None:
     config = load_config()
     # 启动 banner
     print("=" * 50)
-    print("  NanoClaw - 外贸询盘与客户协作工作台")
+    print("  RFQPilot - 外贸询盘与客户协作工作台")
     print(f"  模型: {config.model}")
     print("=" * 50)
     validate_storage_topology(config)
@@ -1146,7 +1146,7 @@ async def async_main() -> None:
     try:
         await gateway.run()
     except KeyboardInterrupt:
-        print("\n[NanoClaw] 正在退出...")
+        print("\n[RFQPilot] 正在退出...")
     finally:
         if inquiry_task:
             inquiry_task.cancel()
@@ -1183,7 +1183,7 @@ def main() -> None:
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:
-        print("\n[NanoClaw] 正在退出...")
+        print("\n[RFQPilot] 正在退出...")
         import os
         os._exit(0)  # 强制退出，杀掉残留的 WebSocket 子线程
 

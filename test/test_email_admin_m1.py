@@ -37,7 +37,7 @@ def account_payload(provider="qq", address="sales@qq.com", auth_code="mailbox-co
     return {
         "display_name": "Sales mailbox", "provider": provider, "address": address,
         "auth_code": auth_code, "inbound_enabled": True, "outbound_enabled": False,
-        "poll_seconds": 60, "sender_name": "NanoClaw Sales",
+        "poll_seconds": 60, "sender_name": "RFQPilot Sales",
         "allowed_senders": [], "allowed_recipients": [],
     }
 

@@ -1,4 +1,4 @@
--- NanoClaw structured long-term memory (MySQL 8 / InnoDB / utf8mb4).
+-- RFQPilot structured long-term memory (MySQL 8 / InnoDB / utf8mb4).
 -- Select the database configured by NANOCLAW_MEMORY_MYSQL_DATABASE before running.
 
 CREATE TABLE IF NOT EXISTS customer_memory_consent (

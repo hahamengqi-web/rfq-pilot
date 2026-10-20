@@ -21,7 +21,7 @@ async function renderSettings() {
   container.innerHTML = `
     <div class="page-header">
       <h1>⚙️ 设置</h1>
-      <p>配置 API 连接信息和 NanoClaw 工作区</p>
+      <p>配置 API 连接信息和 RFQPilot 工作区</p>
     </div>
     <div class="page-body">
       <div class="card">
@@ -151,7 +151,7 @@ async function renderSettings() {
     btnToggleKey.textContent = keyVisible ? '🙈' : '👁️';
   });
 
-  // ── 保存配置到 NanoClaw ──────────────────
+  // ── 保存配置到 RFQPilot ──────────────────
   btnSaveConfig.addEventListener('click', async () => {
     const apiKey = inputKey.value.trim();
     const baseUrl = inputUrl.value.trim();

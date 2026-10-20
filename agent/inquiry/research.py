@@ -113,7 +113,7 @@ class ResearchWeb:
                 if parts.query:
                     path += "?" + parts.query
                 conn.request("GET", path, headers={
-                    "User-Agent": "NanoClaw-CompanyResearch/1.0",
+                    "User-Agent": "RFQPilot-CompanyResearch/1.0",
                     "Accept": "text/html,text/plain,application/xhtml+xml",
                     "Accept-Encoding": "identity",
                 })
@@ -212,7 +212,7 @@ class ResearchWeb:
             if url in visited:
                 continue
             visited.add(url)
-            if robots is not None and not robots.can_fetch("NanoClaw-CompanyResearch/1.0", url):
+            if robots is not None and not robots.can_fetch("RFQPilot-CompanyResearch/1.0", url):
                 pages.append({"url": url, "status": "blocked_by_robots"})
                 continue
             try:
@@ -319,7 +319,7 @@ class ResearchWeb:
                         params={"q": normalized, "format": "jsonv2", "limit": 5,
                                 "addressdetails": 1, "extratags": 1, "namedetails": 1},
                         headers={
-                            "User-Agent": "NanoClaw-CompanyResearch/1.0",
+                            "User-Agent": "RFQPilot-CompanyResearch/1.0",
                             "Accept-Language": "en,zh-CN;q=0.8",
                         },
                     )

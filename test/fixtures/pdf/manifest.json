@@ -1,6 +1,6 @@
 {
   "schema_version": "pdf-fixtures-v1",
-  "description": "Synthetic, de-identified PDF inputs for the NanoClaw M0 contract. Files are generated in temporary directories and are never business documents.",
+  "description": "Synthetic, de-identified PDF inputs for the RFQPilot M0 contract. Files are generated in temporary directories and are never business documents.",
   "generator": "test/trade_rag/pdf_fixture_factory.py",
   "cases": [
     {

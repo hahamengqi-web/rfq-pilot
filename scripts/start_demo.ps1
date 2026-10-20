@@ -124,7 +124,7 @@ $pidFile = Join-Path $projectRoot "workspace\runtime\demo-main.pid"
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pidFile) | Out-Null
 Stop-NanoClawListeners
 Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
-Write-Host "[3/5] 启动 NanoClaw..."
+Write-Host "[3/5] 启动 RFQPilot..."
 $stdout = Join-Path $projectRoot "workspace\runtime\demo-main.stdout.log"
 $stderr = Join-Path $projectRoot "workspace\runtime\demo-main.stderr.log"
 $process = Start-Process -FilePath $python -ArgumentList "main.py" -WorkingDirectory $projectRoot `

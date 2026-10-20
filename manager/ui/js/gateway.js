@@ -12,7 +12,7 @@ async function renderGateway() {
   container.innerHTML = `
     <div class="page-header">
       <h1>🖥️ 网关</h1>
-      <p>管理 NanoClaw Gateway 的运行状态</p>
+      <p>管理 RFQPilot Gateway 的运行状态</p>
     </div>
     <div class="page-body">
       <!-- 状态栏 -->

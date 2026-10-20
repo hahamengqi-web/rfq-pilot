@@ -81,7 +81,7 @@ def test_safe_account_response_contract_cannot_serialize_credentials():
         inbound_enabled=True,
         outbound_enabled=False,
         poll_seconds=60,
-        sender_name="NanoClaw Sales",
+        sender_name="RFQPilot Sales",
         allowed_senders=(),
         allowed_recipients=(),
         status=EmailAccountStatus.DISABLED,

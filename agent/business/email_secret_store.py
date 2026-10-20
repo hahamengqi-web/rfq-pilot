@@ -68,7 +68,7 @@ def _dpapi_protect(value: bytes) -> bytes:
     source, keepalive = _blob(value)
     output = _DataBlob()
     crypt32 = ctypes.windll.crypt32
-    if not crypt32.CryptProtectData(ctypes.byref(source), "NanoClaw mailbox secret", None, None, None,
+    if not crypt32.CryptProtectData(ctypes.byref(source), "RFQPilot mailbox secret", None, None, None,
                                     0x01, ctypes.byref(output)):
         raise EmailSecretStoreError("email_secret_protect_failed")
     try:

@@ -1,8 +1,8 @@
 """
-NanoClaw 外贸业务模块配置
+RFQPilot 外贸业务模块配置
 
 从 business_config.json 加载非敏感业务配置。
-RFQ 抽取与 NanoClaw 主 Agent 统一使用 NANOCLAW_API_KEY。
+RFQ 抽取与 RFQPilot 主 Agent 统一使用 NANOCLAW_API_KEY。
 """
 
 import json

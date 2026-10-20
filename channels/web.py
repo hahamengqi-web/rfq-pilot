@@ -66,7 +66,7 @@ from agent.customer_service.handoffs import CustomerHandoffService, HandoffError
 def create_app() -> FastAPI:
     """Application factory for local UI previews and HTTP integration tests."""
     channel = WebChannel(MessageBus())
-    channel._app = FastAPI(title="NanoClaw Web")
+    channel._app = FastAPI(title="RFQPilot Web")
     channel._register_routes()
     return channel._app
 
@@ -167,7 +167,7 @@ class WebChannel(Channel):
         await asyncio.to_thread(coordinator.reconcile_indexes_once)
         coordinator.start()
         # 创建 FastAPI 应用
-        self._app = FastAPI(title="NanoClaw Web")
+        self._app = FastAPI(title="RFQPilot Web")
 
         # 注册路由
         self._register_routes()

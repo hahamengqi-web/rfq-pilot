@@ -1,7 +1,7 @@
 """
 Gateway 进程管理器
 
-管理 NanoClaw Gateway (main.py) 的子进程生命周期，
+管理 RFQPilot Gateway (main.py) 的子进程生命周期，
 捕获 stdout/stderr 并存入环形缓冲区供 WebSocket 推送。
 """
 

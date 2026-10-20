@@ -30,7 +30,7 @@ def account_payload(address: str) -> dict:
         "inbound_enabled": True,
         "outbound_enabled": False,
         "poll_seconds": 60,
-        "sender_name": "NanoClaw Sales",
+        "sender_name": "RFQPilot Sales",
         "allowed_senders": [],
         "allowed_recipients": [],
     }

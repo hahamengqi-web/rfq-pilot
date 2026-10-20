@@ -93,7 +93,7 @@ class CustomerPortalChannel(Channel):
 
     def create_app(self) -> FastAPI:
         ui_dir = Path(__file__).parent / "web_ui"
-        app = FastAPI(title="NanoClaw Customer Portal")
+        app = FastAPI(title="RFQPilot Customer Portal")
         # The marketing homepage is served by the workspace port while account
         # registration remains isolated on the customer portal port.
         app.add_middleware(

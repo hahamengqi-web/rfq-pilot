@@ -1,7 +1,7 @@
 """
 MCP (Model Context Protocol) 工具模块
 
-提供 MCPClientManager 和 MCPTool，集成外部 MCP Server 到 NanoClaw。
+提供 MCPClientManager 和 MCPTool，集成外部 MCP Server 到 RFQPilot。
 
 关键约束：
 - 所有 print 不使用 emoji（Windows GBK 会崩），用 [MCP]、[!] 代替
@@ -24,7 +24,7 @@ class MCPTool(Tool):
     """
     MCP 工具包装器
 
-    将 MCP Server 提供的工具包装为 NanoClaw 的 Tool 接口。
+    将 MCP Server 提供的工具包装为 RFQPilot 的 Tool 接口。
     工具名格式: {server_name}__{tool_name}，避免跨 server 冲突。
     """
 

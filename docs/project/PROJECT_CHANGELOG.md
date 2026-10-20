@@ -27,7 +27,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | 新增独立 `employee_agent/` runtime；`agent/internal_langgraph_agent.py` 改为薄适配层；同步调整 `main.py`、依赖、环境示例、README、路由文档及专项测试。 |
-| 变更摘要 | 使用显式 LangGraph `StateGraph` 替换内部员工 Agent 原有的手写模型—工具循环。独立 runtime 不引用 NanoClaw；薄适配层注入现有 Provider、ToolRegistry、MCP 工具、WorkflowService、会话和记忆生命周期。 |
+| 变更摘要 | 使用显式 LangGraph `StateGraph` 替换内部员工 Agent 原有的手写模型—工具循环。独立 runtime 不引用 RFQPilot；薄适配层注入现有 Provider、ToolRegistry、MCP 工具、WorkflowService、会话和记忆生命周期。 |
 | 状态边界 | 初始版本使用 SQLite 保存未完成请求的单轮编排断点，随后正式运行后端已迁移到 Redis，SQLite 仅保留测试用途。会话仍由 SessionManager/MySQL 保存，RFQ、报价、审批和邮件仍以业务数据库为权威。 |
 | 等价行为 | 保留最大迭代次数、工具重复调用检查、通用 Provider 错误回复、工具消息持久化、`query_trade_data` 专用观察、询盘工作流观察和 MemoryLifecycle 工具结果事件。 |
 | 验证 | 新增断点恢复、逐工具断点、成功清理、配置边界测试；相关定向 `36 passed`；全量 `468 passed, 4 skipped, 3 warnings, 40 subtests passed`；`uv lock --check --offline` 通过。 |
@@ -85,7 +85,7 @@
 | 修改位置 | `trade_rag/` OCR、知识仓库、切块与引用；知识库 API/UI；OCR/PDF/向量后端测试；README 与状态文档 |
 | 变更摘要 | PaddleOCR 处理扫描 PDF 页、PDF 内嵌图片和独立 PNG/JPEG/WebP；每份文档使用连续的一基图片索引。OCR 文字生成独立 Parent/Child 并进入语义与关键词索引，图片元数据随 Child 保存，回答引用增加结构化图片字段。 |
 | 审批与失败边界 | 低置信度 OCR 必须人工确认后才入库，且不改变公开分类；无文字图片保留 `no_text` 和图片索引但不产生向量；缺页、识别失败和不安全 PDF 继续失败关闭。 |
-| Docker 边界 | `.paddlex` 保存在项目目录且不提交 Git；现有 Compose 只包含数据服务，不启动 NanoClaw 或 OCR。 |
+| Docker 边界 | `.paddlex` 保存在项目目录且不提交 Git；现有 Compose 只包含数据服务，不启动 RFQPilot 或 OCR。 |
 | 验证 | OCR/PDF/向量定向测试通过；真实 PaddleOCR 图片与扫描 PDF 冒烟 `1 passed`；根测试 `408 passed, 4 skipped, 40 subtests passed`；Python 编译、前端 JS 语法、112 包锁文件检查和 Compose 静态解析通过。 |
 | 操作者 | Codex |
 
@@ -95,7 +95,7 @@
 |---|---|
 | 修改位置 | `channels/web.py`、`main.py`、`config.py`、`.env`、`.env.example`、Web/配置测试和状态文档 |
 | 变更摘要 | 保留 `127.0.0.1:8765` 营销首页和 `127.0.0.1:8766` 客户门户，新增 `127.0.0.1:8767` 独立工作空间。工作空间端口根路径直接返回完整 UI，并使用 `workspace_web` 渠道名隔离 WebSocket 出站路由；公共端口仍可保留 `/workspace` 兼容入口。 |
-| 验证结果 | 相关专项 `33 passed`；根目录全量 `394 passed, 3 skipped, 40 subtests passed`。未启动常驻服务，配置生效需重启 NanoClaw。 |
+| 验证结果 | 相关专项 `33 passed`；根目录全量 `394 passed, 3 skipped, 40 subtests passed`。未启动常驻服务，配置生效需重启 RFQPilot。 |
 | 安全边界 | 三个地址均绑定 `127.0.0.1`，只允许本机访问；没有开放局域网或公网监听。 |
 | 操作者 | Codex |
 
@@ -169,7 +169,7 @@
 | 修改位置 | `deploy/docker/compose.yaml`、`deploy/docker/README.md`、`deploy/docker/M1_ACCEPTANCE.md`、Docker 计划及项目状态文档 |
 | 变更摘要 | 拉取 `mysql:8.4` 并固定实际 digest；生成 Git 忽略且不回显的 Docker 专用随机凭据；仅启动 `business/mysql`，完成健康、应用用户查询、容器重启和 named-volume 持久性验收。 |
 | 验收结果 | MySQL `8.4.10` healthy；`SELECT 1` 通过；重启后 server UUID 一致；仅存在 MySQL 容器、一个 MySQL volume 和隔离网络；宿主只监听 `127.0.0.1:3307`。 |
-| 本地数据边界 | 未挂载/执行业务迁移，未切换 NanoClaw 后端；两份现有 SQLite 的大小和最后写入时间均未变化，可读取的一份 SHA-256 一致。未启动或拉取其他 profiles。 |
+| 本地数据边界 | 未挂载/执行业务迁移，未切换 RFQPilot 后端；两份现有 SQLite 的大小和最后写入时间均未变化，可读取的一份 SHA-256 一致。未启动或拉取其他 profiles。 |
 | 运行说明 | 全局 Docker `config.json` 仍不可读；使用任务专用 CLI 配置目录和批准的提升权限完成，没有修改全局 ACL。首次查询的短参数拼接失败后按策略停止容器，改用显式长参数复验成功，最终容器保持 healthy。 |
 | 操作者 | Codex |
 
@@ -182,7 +182,7 @@
 | 修改位置 | `deploy/docker/M0_ACCEPTANCE.md`、`doc/DOCKER_DATABASE_VECTOR_SERVICES_PLAN.md`、`docs/project/PROJECT_PROGRESS.md`、`docs/project/PROJECT_CHANGELOG.md` |
 | 变更摘要 | 正式收口隔离 Docker 服务 M0：记录 Docker/Compose 版本、四个 profiles 静态解析结果、named volume、端口、镜像标签及零本地数据库引用证据；将镜像 digest 冻结明确延后到 M1 联网拉取前。 |
 | 验收结果 | Docker `29.6.1`、Compose `v5.2.0`；`business`、`vector-local`、`vector-milvus`、`all` 均退出码 0；五个挂载全为 volume，bind mount 为 0；端口只绑定 `127.0.0.1:3307/5433/19530` 且验收时未占用；无 `latest` 标签。 |
-| 数据边界 | 未创建真实 Docker `.env`，未执行 `up`、`pull`、数据库连接、Schema、迁移、数据复制或 volume 操作；未修改任何现有本地数据库、Schema、数据和 NanoClaw 数据库配置。 |
+| 数据边界 | 未创建真实 Docker `.env`，未执行 `up`、`pull`、数据库连接、Schema、迁移、数据复制或 volume 操作；未修改任何现有本地数据库、Schema、数据和 RFQPilot 数据库配置。 |
 | 待处理 | Docker CLI 报告用户 `config.json` 访问权限警告；不影响本次静态解析，但 M1 启动或拉取镜像前必须修复并复验。 |
 | 操作者 | Codex |
 
@@ -344,7 +344,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `doc/RAG_PDF_RETRIEVAL_IMPLEMENTATION_PLAN.md`、`docs/project/PROJECT_PROGRESS.md`、`docs/project/PROJECT_CHANGELOG.md` |
-| 变更摘要 | 基于参考 PDF 流程和当前 NanoClaw 实现新增 M0-M6 计划，覆盖 PDF 安全识别、页级解析、归一化、OCR 门禁、manifest v3 双哈希、PDF-aware 父子切块、Parent 回取、真实索引状态、页码引用、Web 管理、测试与发布门禁。 |
+| 变更摘要 | 基于参考 PDF 流程和当前 RFQPilot 实现新增 M0-M6 计划，覆盖 PDF 安全识别、页级解析、归一化、OCR 门禁、manifest v3 双哈希、PDF-aware 父子切块、Parent 回取、真实索引状态、页码引用、Web 管理、测试与发布门禁。 |
 | 原因 | 当前知识导入仅支持 UTF-8 文本；同时 `index_status=ready` 只代表切块成功，`RagPipeline` 尚未保存/回取 Parent，不能直接通过增加 `.pdf` 后缀宣称实现 PDF small-to-big 检索。 |
 | 验证方式 | 对照 `channels/web.py`、`channels/web_ui/index.html`、`trade_rag/knowledge_repository.py`、`loaders.py`、`contracts.py`、`chunking.py`、`stores.py`、`pipeline.py`、`server.py`、现有知识库测试及场景 C 计划；检查 Markdown 标题、表格、Mermaid、状态边界和依赖表述。 |
 | 实施边界 | 本次仅修改文档；未安装 PDF 依赖，未实现解析/OCR/索引代码，未导入 PDF，未部署 PostgreSQL/pgvector/Milvus，也未调用外部服务。 |
@@ -619,14 +619,14 @@
 | 验证方式 | JavaScript 语法检查及 Web、M2/M3、报价闭环、M4 定向测试 41 项通过；应用内浏览器受宿主本地端口隔离，未将视觉 E2E 标记为通过。 |
 | 操作者 | Codex |
 
-## 2026-07-24（NanoClaw RFQ 检查与业务员确认职责收敛）
+## 2026-07-24（RFQPilot RFQ 检查与业务员确认职责收敛）
 
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `agent/business/email_review_service.py`、`channels/web_ui/static/app.js`、`channels/web_ui/static/app.css`、`channels/web_ui/index.html`、M2/M3/报价闭环测试 |
-| 变更摘要 | 服务端为每封 RFQ 输出 NanoClaw 字段检查摘要、已检查字段数和待补正字段；前端将已有证据的字段设为只读，仅对 `pending_confirmation` 字段开放业务员补正。字段完整时自动预检，业务员直接“确认审核”；确认后生成报价进入审批，批准后由业务员“确认发送”进入受控投递队列。 |
-| 安全边界 | NanoClaw 不推断缺失字段；业务员确认不能绕过待补正字段、报价版本/内容哈希审批、发件账户和收件人白名单门禁。 |
-| 验证方式 | M2/M3/报价闭环定向测试覆盖 NanoClaw 检查状态、字段完整自动可确认、缺失字段需补正、审批和受控投递。 |
+| 变更摘要 | 服务端为每封 RFQ 输出 RFQPilot 字段检查摘要、已检查字段数和待补正字段；前端将已有证据的字段设为只读，仅对 `pending_confirmation` 字段开放业务员补正。字段完整时自动预检，业务员直接“确认审核”；确认后生成报价进入审批，批准后由业务员“确认发送”进入受控投递队列。 |
+| 安全边界 | RFQPilot 不推断缺失字段；业务员确认不能绕过待补正字段、报价版本/内容哈希审批、发件账户和收件人白名单门禁。 |
+| 验证方式 | M2/M3/报价闭环定向测试覆盖 RFQPilot 检查状态、字段完整自动可确认、缺失字段需补正、审批和受控投递。 |
 | 操作者 | Codex |
 
 ## 2026-07-24（邮件确认入口与旧审批错误修复）
@@ -654,7 +654,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `agent/business/email_repository.py`、`email_ingestion.py`、`managed_email_ingestion.py`、`email_review_service.py`、`agent/tools/query_email.py`、`main.py`、`channels/web.py`、`channels/web_ui/`、邮箱测试 |
-| 变更摘要 | 修复启用账户卡在 `validating` 后不再轮询的问题；邮件页默认展示全部入站记录；普通非 RFQ 信息保留在本机，安全通知、自发邮件和白名单外来信仍采用 body-free 持久化；新增 NanoClaw 原生只读邮箱查询工具。 |
+| 变更摘要 | 修复启用账户卡在 `validating` 后不再轮询的问题；邮件页默认展示全部入站记录；普通非 RFQ 信息保留在本机，安全通知、自发邮件和白名单外来信仍采用 body-free 持久化；新增 RFQPilot 原生只读邮箱查询工具。 |
 | 安全边界 | IMAP 继续使用只读 `BODY.PEEK[]`；Agent 工具只返回脱敏列表和本地结构化 RFQ 结果，不返回原始正文，不注册 SMTP/发信能力。 |
 | 验证方式 | 196 个根测试通过、1 个环境测试跳过、40 个子测试通过；真实只读 IMAP 单轮同步成功，账户恢复为 `healthy`，拉取 5 条未同步邮件且 0 条解析失败。 |
 | 操作者 | Codex |
@@ -664,7 +664,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `channels/web_ui/static/customer-preview.js`、`channels/web_ui/static/css/customer.css`、`test/test_customer_portal_contact.py`、项目状态文档 |
-| 变更摘要 | 将容易退化为普通文字的 `N`、`客/You` 标识替换为本地内联 SVG 图形头像：NanoClaw 使用品牌机器人/爪形图标，客户使用人物轮廓；消息行改为明确的双列 Grid，客户 DOM 顺序固定为“气泡、右侧头像”，不再依赖 `order` 调序，并统一头像与气泡顶部基线。 |
+| 变更摘要 | 将容易退化为普通文字的 `N`、`客/You` 标识替换为本地内联 SVG 图形头像：RFQPilot 使用品牌机器人/爪形图标，客户使用人物轮廓；消息行改为明确的双列 Grid，客户 DOM 顺序固定为“气泡、右侧头像”，不再依赖 `order` 调序，并统一头像与气泡顶部基线。 |
 | 验证方式 | JavaScript 语法检查、客户门户定向测试及本机 Chromium 桌面/窄屏截图和元素边界测量；应用内浏览器受宿主端口隔离，不将其标为在线 E2E。 |
 | 操作者 | Codex |
 
@@ -892,7 +892,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `agent/business/config.py`、`agent/business/rfq_extractor.py`、`agent/business/business_config.json`、环境变量示例、黄金集评测和 `test2/business/` 副本 |
-| 变更摘要 | 删除独立 `BUSINESS_LLM_API_KEY`，RFQ 抽取与 NanoClaw 主 Agent 统一读取 `NANOCLAW_API_KEY`；业务抽取仍可使用独立的模型名和 Base URL。 |
+| 变更摘要 | 删除独立 `BUSINESS_LLM_API_KEY`，RFQ 抽取与 RFQPilot 主 Agent 统一读取 `NANOCLAW_API_KEY`；业务抽取仍可使用独立的模型名和 Base URL。 |
 | 安全边界 | 仍只从进程环境或本地 `.env` 读取密钥；JSON 配置和示例不保存真实密钥。 |
 | 验证方式 | 全仓旧变量/旧字段零残留；统一密钥配置测试、邮件黄金集和编译检查通过。 |
 | 操作者 | Codex |
@@ -942,7 +942,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `doc/EMAIL_RFQ_INGESTION_DESIGN_PLAN.md`、`docs/project/PROJECT_PROGRESS.md`、`docs/project/PROJECT_CHANGELOG.md` |
-| 变更摘要 | 新增 NanoClaw 邮件询盘接入设计：基于只读 `EmailSource`、统一邮件信封、MIME/HTML 安全规范化、RFQ v2 多产品与规格抽取、字段证据和待确认状态、数据库幂等/游标/重试、人工审核及 M0-M7 实施路线。 |
+| 变更摘要 | 新增 RFQPilot 邮件询盘接入设计：基于只读 `EmailSource`、统一邮件信封、MIME/HTML 安全规范化、RFQ v2 多产品与规格抽取、字段证据和待确认状态、数据库幂等/游标/重试、人工审核及 M0-M7 实施路线。 |
 | 原因 | 当前项目已有聊天渠道和 RFQ 抽取工具，但尚无邮箱入口；现有 Gateway 会丢失邮件元数据，现有抽取契约缺独立规格、多行项目和证据状态，不能直接形成安全可靠的邮件处理闭环。 |
 | 验证方式 | 对照 `main.py`、`bus/queue.py`、`gateway.py`、`agent/tools/extract_rfq.py`、`agent/models/schemas.py`、`agent/business/`、`pyproject.toml` 和 `uv.lock` 静态核对；检查 Mermaid、表格、状态和“设计未实施”边界。本次未连接邮箱、未创建凭证、未安装依赖、未运行外部服务。 |
 | 操作者 | Codex |
@@ -962,7 +962,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `channels/web.py`、`channels/web_ui/index.html`、`channels/web_ui/static/app.css`、`channels/web_ui/static/app.js`、`docs/project/PROJECT_PROGRESS.md` |
-| 变更摘要 | 按 `docs/guides/前端界面.md` 完成 Cherry Studio 风格 NanoClaw Web 工作区：左侧对话/汇率双标签、中文/英文/德语实时切换、明暗主题持久化、WebSocket 对话、ExchangeRate-API 汇率换算、响应式断点、交互动画与连接/错误状态。 |
+| 变更摘要 | 按 `docs/guides/前端界面.md` 完成 Cherry Studio 风格 RFQPilot Web 工作区：左侧对话/汇率双标签、中文/英文/德语实时切换、明暗主题持久化、WebSocket 对话、ExchangeRate-API 汇率换算、响应式断点、交互动画与连接/错误状态。 |
 | 验证方式 | `node --check channels/web_ui/static/app.js`；`.venv\\Scripts\\python.exe -m compileall -q channels`；FastAPI TestClient 验证 `/`、`/static/app.css`、`/static/app.js` 均返回 200。 |
 | 操作者 | Codex |
 
@@ -971,7 +971,7 @@
 | 项目 | 内容 |
 |---|---|
 | 修改位置 | `test2/business/web_app.py`、`test2/business/web_ui/`、`test2/requirements-business.txt`、`test2/.env.example`、`test2/README.md` |
-| 变更摘要 | 将前端迁移到独立业务包：增加 FastAPI 静态页面服务、健康检查和服务端 WebSocket 代理；聊天默认安全提示，配置 `BUSINESS_AGENT_WS_URL` 后可接入 NanoClaw WebChannel；保留汇率、三语和主题能力。 |
+| 变更摘要 | 将前端迁移到独立业务包：增加 FastAPI 静态页面服务、健康检查和服务端 WebSocket 代理；聊天默认安全提示，配置 `BUSINESS_AGENT_WS_URL` 后可接入 RFQPilot WebChannel；保留汇率、三语和主题能力。 |
 | 原因 | 让 `test2/business` 可独立启动前端，同时不让浏览器直接访问业务数据库、MCP 工具或任何密钥。 |
 | 验证方式 | `node --check business/web_ui/static/app.js`；`python -m compileall -q business`；FastAPI TestClient 验证页面、静态资源、`/health` 和未配置 Agent 的 `/ws` 提示均通过。 |
 | 操作者 | Codex |
@@ -1102,7 +1102,7 @@
 | 修改位置 | `manager/ui/js/gateway.js`、`manager/ui/index.html`、`docs/project/PROJECT_PROGRESS.md` |
 | 变更摘要 | 将“打开 Web UI”改为点击调用栈内同步打开已缓存的动态 URL，避免异步 fetch 后调用 `window.open` 被浏览器弹窗策略拦截；更新前端缓存版本。 |
 | 原因 | 服务端、Manager API 和浏览器实测均确认 Web 可用，剩余故障是异步按钮处理触发弹窗拦截。 |
-| 验证方式 | `http://127.0.0.1:8765/` 返回 200；浏览器页面标题 NanoClaw、状态在线、输入框可用且无控制台错误；Manager v4 脚本已生效。 |
+| 验证方式 | `http://127.0.0.1:8765/` 返回 200；浏览器页面标题 RFQPilot、状态在线、输入框可用且无控制台错误；Manager v4 脚本已生效。 |
 | 操作者 | Codex |
 
 ## 2026-07-21 20:00:00 +08:00
@@ -1152,7 +1152,7 @@
 | 修改位置 | `BUSINESS_MODULE_ROADMAP.md`、`PROJECT_PROGRESS.md`、`PROJECT_CHANGELOG.md` |
 | 变更摘要 | 按 `business-module.md` 新增 P0-P5 分阶段实施计划、询盘到报价到审批跟进的 Mermaid 主题流程、横向安全/幂等/可观测性控制和最小验收场景；核对当前 checkout，明确 `business/` 尚未落地。 |
 | 原因 | 将业务模块改动记录转化为可执行、可验收且不混淆设计与实现状态的实施路线。 |
-| 验证方式 | 读取 `business-module.md`、`config.json`、目录树及现有进度/变更记录；确认未创建数据库、未安装依赖、未注册 MCP 或修改 NanoClaw Python 源码。 |
+| 验证方式 | 读取 `business-module.md`、`config.json`、目录树及现有进度/变更记录；确认未创建数据库、未安装依赖、未注册 MCP 或修改 RFQPilot Python 源码。 |
 | 操作者 | Codex |
 
 ## 2026-07-21 13:44:39 +08:00
@@ -1240,7 +1240,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 变更摘要 | 根据 `NanoClaw-Reusable-Frontend` 设计指南增加 `/customer` 客户询盘门户和 `/ops` 业务员工作台视觉预览，并从现有工作空间侧栏提供入口。页面具备响应式布局、键盘焦点、预览输入、对话框与状态提示。 |
+| 变更摘要 | 根据 `RFQPilot-Reusable-Frontend` 设计指南增加 `/customer` 客户询盘门户和 `/ops` 业务员工作台视觉预览，并从现有工作空间侧栏提供入口。页面具备响应式布局、键盘焦点、预览输入、对话框与状态提示。 |
 | 安全边界 | 按用户确认仅整合视觉与交互：未实现或调用 BFF、客户独立会话、WebSocket、审批、真实邮件、内部口令或任何写操作；客户输入不会传输或保存，业务台不显示虚假业务数据。 |
 | 验证方式 | HTTP 页面/静态资源契约测试、JS 语法检查和主项目全量测试。 |
 
@@ -1248,7 +1248,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 变更摘要 | 将 `/customer` 与 `/ops` 的旧版蓝色预览样式替换为与主工作区同源的 NanoClaw 橙色令牌；拆分共享令牌、通用样式、客户端样式、业务端样式和主题脚本，补充深浅主题、900px/680px 响应式布局、键盘焦点与减少动效支持。 |
+| 变更摘要 | 将 `/customer` 与 `/ops` 的旧版蓝色预览样式替换为与主工作区同源的 RFQPilot 橙色令牌；拆分共享令牌、通用样式、客户端样式、业务端样式和主题脚本，补充深浅主题、900px/680px 响应式布局、键盘焦点与减少动效支持。 |
 | 修改位置 | `channels/web_ui/customer.html`、`channels/web_ui/ops.html`、`channels/web_ui/static/css/`、`channels/web_ui/static/js/theme.js`、`test/test_web_file_import.py` 及前端交付文档。 |
 | 安全边界 | 仍只整合视觉与交互：未实现或调用客户 WebSocket、BFF、审批、报价、邮件、认证或写操作；客户输入只在当前 DOM 中预览且不会传输或保存。 |
 | 验证方式 | 静态资源/页面契约测试、JavaScript 语法、Python 编译、主项目测试及浏览器桌面/窄屏交互验收。 |
@@ -1259,7 +1259,7 @@
 |---|---|
 | 修改位置 | `docs/archive/记忆管理更新.md`、`docs/project/PROJECT_PROGRESS.md`、`docs/project/PROJECT_CHANGELOG.md` |
 | 变更摘要 | 基于原 `docs/archive/记忆管理.md` 编写可落地的更新方案，补充当前实现基线、三层目标架构、结构化工作记忆、语义/情节/程序记忆模型、写入与召回、衰减与删除、存储接口、M0-M5 实施计划及验收标准。 |
-| 原因 | 原文主要说明概念和示例，缺少与当前 NanoClaw 代码的差距说明、数据契约、权限治理、迁移路径和可验证的完成定义。 |
+| 原因 | 原文主要说明概念和示例，缺少与当前 RFQPilot 代码的差距说明、数据契约、权限治理、迁移路径和可验证的完成定义。 |
 | 验证方式 | 对照 `agent/memory.py`、`agent/context.py`、`agent/loop.py`、`session/manager.py`、`main.py` 和 `workspace/memory/` 核验现状；检查 Markdown 标题、表格、代码围栏和 Mermaid 结构；确认仅交付设计文档，未误报运行代码已实现。 |
 | 操作者 | Codex |
 

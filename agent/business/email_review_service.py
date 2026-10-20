@@ -130,7 +130,7 @@ class EmailReviewService:
     @staticmethod
     def _agent_check(extraction: dict, *, email_status: str,
                      extraction_mode: str | None, extractor_version: str | None) -> dict:
-        """Summarize NanoClaw's RFQ field check without inventing missing values."""
+        """Summarize RFQPilot's RFQ field check without inventing missing values."""
         nodes = []
         customer = extraction.get("customer") if isinstance(extraction, dict) else None
         if isinstance(customer, dict):

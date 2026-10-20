@@ -28,7 +28,7 @@
 询盘提取、产品匹配、报价草稿、审批协作、邮件回复草拟和跟进，并不表示另有一个
 独立的“内部报价 Agent”。项目当前正式对外提供的就是上述两个 Agent。内部员工
 Agent 的模型—工具循环由独立 `employee_agent` LangGraph runtime 编排，再通过薄适配层
-接入 NanoClaw。NanoClaw 继续负责入口、权限、会话和工具装配；业务工具、MCP、工作流
+接入 RFQPilot。RFQPilot 继续负责入口、权限、会话和工具装配；业务工具、MCP、工作流
 事件和记忆生命周期保持原有实现，不强行并入任一框架。LangGraph Redis 只保存未完成
 请求的编排断点，完成后自动清理；SQLite 只用于自动化和本地隔离测试。
 

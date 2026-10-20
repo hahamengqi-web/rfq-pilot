@@ -1,5 +1,5 @@
 /**
- * NanoClaw Manager — 主应用
+ * RFQPilot Manager — 主应用
  * 路由 + 侧边栏导航 + 主题切换 + 初始化
  */
 

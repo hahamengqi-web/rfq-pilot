@@ -1,5 +1,5 @@
 """
-NanoClaw 配置模块
+RFQPilot 配置模块
 
 提供配置加载和管理功能，支持：
 - 从 JSON 文件读取配置
@@ -53,7 +53,7 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass
 class NanoClawConfig:
     """
-    NanoClaw 配置结构
+    RFQPilot 配置结构
 
     包含 Agent 运行所需的所有配置参数。
 

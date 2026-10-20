@@ -6,7 +6,7 @@
 入口与装配       main.py / gateway.py / config.py
 渠道层           channels/ / bus/
 内部员工 Agent   employee_agent/
-NanoClaw 适配层  agent/
+RFQPilot 适配层  agent/
 业务 MCP         mcp_servers/
 企业知识 RAG     trade_rag/
 RAG 评估         rag_evaluation/

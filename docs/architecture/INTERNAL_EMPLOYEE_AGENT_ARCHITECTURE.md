@@ -3,15 +3,15 @@
 ## 设计结论
 
 内部员工 Agent 的模型—工具编排使用独立的 `employee_agent` LangGraph runtime。
-它不引用 NanoClaw 模块，也不承载渠道、鉴权或业务数据库职责。
+它不引用 RFQPilot 模块，也不承载渠道、鉴权或业务数据库职责。
 
-NanoClaw 只通过 `NanoClawEmployeeAgentAdapter` 接入该 runtime，并注入已有的模型、
+RFQPilot 只通过 `NanoClawEmployeeAgentAdapter` 接入该 runtime，并注入已有的模型、
 工具、MCP、会话、工作流和记忆生命周期。客户咨询 Agent 不受本次改造影响。
 
 ```text
 CLI / Web / QQ / 飞书
         ↓
-NanoClaw：鉴权、路由、会话、工具装配
+RFQPilot：鉴权、路由、会话、工具装配
         ↓  薄适配层
 employee_agent：LangGraph 编排、单轮恢复断点
         ↓  调用现有服务
@@ -67,7 +67,7 @@ Redis Checkpointer 需要 RedisJSON 和 RediSearch；项目 Compose 使用 Redis
 
 ## 不纳入 LangGraph 的部分
 
-- NanoClaw 的渠道、Gateway、RBAC、JWT 和 Agent 路由
+- RFQPilot 的渠道、Gateway、RBAC、JWT 和 Agent 路由
 - MCP Server 和 ToolRegistry 的业务实现
 - RFQ、报价、审批、邮件与产品服务
 - 客户产品咨询 Agent 的三个受控查询工具

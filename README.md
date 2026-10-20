@@ -1,4 +1,4 @@
-# NanoClaw
+# RFQPilot
 
 > 面向外贸询盘、企业知识检索与客户协作的多入口 AI Agent 工作台。
 
@@ -6,7 +6,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.136.1-009688?logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-1.27.0-5A45FF)
 
-NanoClaw 包含面向客户的产品与售后智能客服，以及内部持久化询盘工作流。客户客服从独立门户运行，只能检索公开知识；询盘背调、人工审核与报价仍在内部工作台处理。新流程入口是 `/inquiries`，部署与操作说明见 [询盘工作流运行说明](docs/architecture/INQUIRY_WORKFLOW.md)。
+RFQPilot 包含面向客户的产品与售后智能客服，以及内部持久化询盘工作流。客户客服从独立门户运行，只能检索公开知识；询盘背调、人工审核与报价仍在内部工作台处理。新流程入口是 `/inquiries`，部署与操作说明见 [询盘工作流运行说明](docs/architecture/INQUIRY_WORKFLOW.md)。
 
 它不只是一个聊天页面。项目重点解决的是：**怎样让 AI 在真实业务中找到正确资料、调用正确工具、隔离客户与内部数据，并把不确定的对外操作留给人工确认。**
 
@@ -131,7 +131,7 @@ uv sync --frozen
 
 如果项目已经存在可用的 `.venv`，可以跳过这一步。
 
-### 3. 启动 NanoClaw
+### 3. 启动 RFQPilot
 
 ```powershell
 .\.venv\Scripts\python.exe main.py
@@ -168,7 +168,7 @@ Manager 默认打开 `http://127.0.0.1:3000/ui/`，用于管理 Gateway 状态�
 
 ## 安全设计
 
-NanoClaw 将业务安全规则放在服务端确定性代码中，而不是只依赖模型提示词：
+RFQPilot 将业务安全规则放在服务端确定性代码中，而不是只依赖模型提示词：
 
 - 客户侧查询经过账号、租户、用途、会话和公开分类过滤。
 - Access JWT 使用严格的 HS256、签发方、受众、用途和过期时间校验；刷新令牌只以哈希形式保存并单次轮换。
@@ -185,12 +185,12 @@ NanoClaw 将业务安全规则放在服务端确定性代码中，而不是只�
 ## 项目结构
 
 ```text
-nanoclaw/
+rfq-pilot/
 ├─ main.py                  # 总装入口：渠道、Agent、工具和后台任务
 ├─ gateway.py               # 消息路由、会话隔离与并发控制
 ├─ config.py                # 配置模型、环境变量与安全校验
 ├─ employee_agent/          # 独立 LangGraph 内部员工 Agent runtime
-├─ agent/                   # NanoClaw 适配、询盘工作流、工具与记忆运行时
+├─ agent/                   # RFQPilot 适配、询盘工作流、工具与记忆运行时
 ├─ bus/                     # 入站与出站异步消息队列
 ├─ channels/                # CLI、Web、询盘工作台、QQ、飞书与邮件渠道
 ├─ manager/                 # Gateway/MCP 管理服务和管理界面
@@ -199,7 +199,7 @@ nanoclaw/
 ├─ providers/               # OpenAI 兼容模型 Provider
 ├─ prompts/                 # 内部员工身份提示词及历史提示资料
 ├─ session/                 # 会话、对话索引与迁移工具
-├─ skills/                  # NanoClaw 运行时可加载的业务 Skills
+├─ skills/                  # RFQPilot 运行时可加载的业务 Skills
 ├─ trade_rag/               # 文档导入、切块、检索、生成与向量后端
 ├─ rag_evaluation/          # RAG 评估实现、阈值配置与运行说明
 ├─ deploy/docker/           # 隔离数据库和向量服务 Compose 配置
@@ -349,4 +349,4 @@ docker compose --env-file deploy\docker\.env `
   -f deploy\docker\compose.yaml --profile all logs --tail 100
 ```
 
-等待目标服务显示 `healthy` 后，再进行数据库迁移、索引重建或切换 NanoClaw 后端。拉取和启动 Docker 服务本身不会把 NanoClaw 从默认的 SQLite、内存向量或内存关键词后端切换过去。
+等待目标服务显示 `healthy` 后，再进行数据库迁移、索引重建或切换 RFQPilot 后端。拉取和启动 Docker 服务本身不会把 RFQPilot 从默认的 SQLite、内存向量或内存关键词后端切换过去。

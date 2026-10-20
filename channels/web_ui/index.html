@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="NanoClaw intelligent foreign trade workspace">
-  <title>NanoClaw</title>
+  <meta name="description" content="RFQPilot intelligent foreign trade workspace">
+  <title>RFQPilot</title>
   <link rel="stylesheet" href="/static/app.css?v=20261017-email-workflow">
   <link rel="stylesheet" href="/static/css/markdown.css">
   <link rel="stylesheet" href="/static/import.css">
@@ -24,7 +24,7 @@
   </dialog>
   <div class="app-shell">
     <aside class="rail" aria-label="Primary navigation">
-      <div class="brand" aria-label="NanoClaw"><span class="brand-mark">N</span></div>
+      <div class="brand" aria-label="RFQPilot"><span class="brand-mark">N</span></div>
       <nav class="rail-nav">
         <a class="rail-button rail-link" href="/inquiries" aria-label="询盘工作台"><span>单</span><span class="rail-label">询盘工作台</span></a>
         <button class="rail-button active" data-view="chat" data-i18n-title="nav.chat" aria-label="Chat">
@@ -68,7 +68,7 @@
 
     <section class="conversation-panel" id="conversationPanel">
       <header class="panel-header">
-        <div><p class="eyebrow" data-i18n="workspace.label">WORKSPACE</p><h1 data-i18n="app.name">NanoClaw</h1></div>
+        <div><p class="eyebrow" data-i18n="workspace.label">WORKSPACE</p><h1 data-i18n="app.name">RFQPilot</h1></div>
         <span class="workspace-actions"><button id="workspaceToggle" class="icon-button" data-i18n-title="workspace.collapse" aria-label="Collapse workspace"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button><button id="newChat" class="icon-button" data-i18n-title="chat.new" aria-label="New chat">
           <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
         </button></span>
@@ -93,7 +93,7 @@
       <section id="chatView" class="view active" aria-labelledby="chatTitle">
         <header class="stage-header">
           <button id="mobileMenu" class="icon-button mobile-only" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-          <div class="title-block"><h2 id="chatTitle" data-i18n="chat.defaultTitle">New conversation</h2><p><span id="connectionText" data-i18n="status.connecting">Connecting…</span><span class="separator">·</span><span data-i18n="chat.model">NanoClaw Agent</span></p></div>
+          <div class="title-block"><h2 id="chatTitle" data-i18n="chat.defaultTitle">New conversation</h2><p><span id="connectionText" data-i18n="status.connecting">Connecting…</span><span class="separator">·</span><span data-i18n="chat.model">RFQPilot Agent</span></p></div>
           <div class="header-actions"><button class="icon-button" data-i18n-title="chat.more"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div>
         </header>
         <div id="messages" class="messages" aria-live="polite">
@@ -111,7 +111,7 @@
         <div class="composer-area">
           <form id="composer" class="composer">
             <div id="conversationFiles" class="conversation-files" aria-live="polite"></div>
-            <textarea id="messageInput" rows="1" data-i18n-placeholder="chat.placeholder" placeholder="Message NanoClaw…"></textarea>
+            <textarea id="messageInput" rows="1" data-i18n-placeholder="chat.placeholder" placeholder="Message RFQPilot…"></textarea>
             <div class="composer-toolbar">
               <div class="composer-left">
                 <div class="import-wrap">
@@ -139,7 +139,7 @@
               </button>
             </div>
           </form>
-          <p class="disclaimer" data-i18n="chat.disclaimer">NanoClaw can make mistakes. Verify important business information.</p>
+          <p class="disclaimer" data-i18n="chat.disclaimer">RFQPilot can make mistakes. Verify important business information.</p>
         </div>
       </section>
 
@@ -204,7 +204,7 @@
                 <label class="email-span-2"><span data-i18n="email.authCode">邮箱授权码</span><input id="emailAuthCode" type="password" autocomplete="off" data-i18n-placeholder="email.authCodePlaceholder" placeholder="新增或轮换时填写"><small data-i18n="email.authCodeHelp">请使用邮箱生成的客户端授权码，不是网页登录密码。</small></label>
                 <label><span data-i18n="email.folder">收件文件夹</span><input id="emailFolder" value="INBOX" readonly></label>
                 <label><span data-i18n="email.pollSeconds">轮询间隔（秒）</span><input id="emailPollSeconds" type="number" min="30" max="3600" value="60" required></label>
-                <label class="email-span-2"><span data-i18n="email.senderName">发件人名称</span><input id="emailSenderName" value="NanoClaw Sales" maxlength="80"></label>
+                <label class="email-span-2"><span data-i18n="email.senderName">发件人名称</span><input id="emailSenderName" value="RFQPilot Sales" maxlength="80"></label>
                 <label class="email-span-2"><span data-i18n="email.allowedSenders">允许的发件人</span><textarea id="emailAllowedSenders" rows="3" data-i18n-placeholder="email.allowlistPlaceholder" placeholder="每行一个邮箱地址"></textarea></label>
                 <label class="email-span-2"><span data-i18n="email.allowedRecipients">允许的收件人</span><textarea id="emailAllowedRecipients" rows="3" data-i18n-placeholder="email.allowlistPlaceholder" placeholder="每行一个邮箱地址"></textarea><small data-i18n="email.recipientRule">启用发件时至少需要一个明确收件人。</small></label>
               </div>

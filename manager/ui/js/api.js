@@ -1,5 +1,5 @@
 /**
- * NanoClaw Manager — API 客户端
+ * RFQPilot Manager — API 客户端
  * 封装所有与 Launcher 后端的通信。
  */
 

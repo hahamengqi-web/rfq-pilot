@@ -51,7 +51,7 @@ def build_service(*, approved=True, healthy=True, outbound=True, allowed=None):
         "account_id": account_id, "display_name": "Sales", "provider": "qq",
         "address": "sales@qq.com", "secret_ref": f"email-account/{account_id}", "folder": "INBOX",
         "inbound_enabled": True, "outbound_enabled": outbound, "poll_seconds": 60,
-        "sender_name": "NanoClaw Sales", "allowed_senders": [],
+        "sender_name": "RFQPilot Sales", "allowed_senders": [],
         "allowed_recipients": allowed or ["buyer@example.com"],
         "status": "healthy" if healthy else "disabled",
     }, actor="test")
@@ -225,7 +225,7 @@ def test_smtp_adapter_uses_ssl_authorization_code_and_deterministic_message_id()
         "body_snapshot": "Approved body\n", "smtp_message_id": "<stable@outbox.local>",
         "in_reply_to": None,
     }, {
-        "provider": "qq", "address": "sales@qq.com", "sender_name": "NanoClaw Sales",
+        "provider": "qq", "address": "sales@qq.com", "sender_name": "RFQPilot Sales",
         "secret_ref": "email-account/one",
     })
     assert result == "<stable@outbox.local>"

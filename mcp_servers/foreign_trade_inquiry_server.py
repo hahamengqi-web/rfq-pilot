@@ -1,8 +1,8 @@
 """
-NanoClaw 外贸业务 MCP Server
+RFQPilot 外贸业务 MCP Server
 
 通过 FastMCP 将所有业务工具注册为 MCP 工具，
-NanoClaw 通过 MCP Client 连接后即可调用。
+RFQPilot 通过 MCP Client 连接后即可调用。
 
 启动方式：
     python -m mcp_servers.foreign_trade_inquiry_server
@@ -85,7 +85,7 @@ async def extract_rfq(session_key: str, raw_text: str) -> str:
     缺失字段标记为"待确认"，不会自行补全。
 
     Args:
-        session_key: 会话标识（由 NanoClaw 传入，格式 {channel}:{sender_id}）
+        session_key: 会话标识（由 RFQPilot 传入，格式 {channel}:{sender_id}）
         raw_text: 询盘原始文本（英文）
     """
     from agent.tools.extract_rfq import extract_rfq_impl

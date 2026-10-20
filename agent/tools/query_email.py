@@ -85,7 +85,7 @@ class QueryInboundEmailTool(Tool):
                 "body_in_agent_response": False,
                 "can_send_email": False,
             }
-            # Preserve privacy while still letting NanoClaw explain local RFQ parsing results.
+            # Preserve privacy while still letting RFQPilot explain local RFQ parsing results.
             customer = result["extraction"].get("customer")
             if isinstance(customer, dict) and isinstance(customer.get("email"), dict):
                 customer["email"] = {**customer["email"], "value": "[masked]"}

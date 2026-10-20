@@ -1,9 +1,9 @@
 """
-NanoClaw Manager Launcher
+RFQPilot Manager Launcher
 
 FastAPI 服务，提供：
 1. 托管管理 UI（静态文件）
-2. Config 直接读写（不依赖 NanoClaw Gateway 是否运行）
+2. Config 直接读写（不依赖 RFQPilot Gateway 是否运行）
 3. Gateway 进程管理（启动/停止/状态/日志推送）
 4. MCP Server 配置管理（CRUD + 开关）
 5. 工具端点（打开工作区、打开 CLI 终端）
@@ -215,7 +215,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="NanoClaw Manager", lifespan=lifespan)
+app = FastAPI(title="RFQPilot Manager", lifespan=lifespan)
 
 # CORS — 允许本地开发调试
 app.add_middleware(
@@ -535,7 +535,7 @@ async def scan_python_envs():
 
 @app.post("/api/util/open-explorer")
 async def open_explorer():
-    """在文件管理器中打开 NanoClaw 工作区。"""
+    """在文件管理器中打开 RFQPilot 工作区。"""
     path = str(NANOCLAW_DIR.resolve())
     try:
         if sys.platform == "win32":
@@ -551,7 +551,7 @@ async def open_explorer():
 
 @app.post("/api/util/open-cli")
 async def open_cli():
-    """在新终端窗口中打开 NanoClaw CLI。"""
+    """在新终端窗口中打开 RFQPilot CLI。"""
     script = str((NANOCLAW_DIR / "main.py").resolve())
     try:
         if sys.platform == "win32":
@@ -577,7 +577,7 @@ async def open_cli():
 
 @app.get("/api/util/workspace-path")
 async def workspace_path():
-    """返回 NanoClaw 工作区路径。"""
+    """返回 RFQPilot 工作区路径。"""
     return {"path": str(NANOCLAW_DIR.resolve())}
 
 
@@ -585,7 +585,7 @@ async def workspace_path():
 
 
 if __name__ == "__main__":
-    print(f"🌐 NanoClaw Manager 启动: http://localhost:{LAUNCHER_PORT}")
+    print(f"🌐 RFQPilot Manager 启动: http://localhost:{LAUNCHER_PORT}")
     print(f"📁 工作区: {NANOCLAW_DIR}")
     print(f"📂 管理 UI: http://localhost:{LAUNCHER_PORT}/ui/")
     webbrowser.open(f"http://localhost:{LAUNCHER_PORT}/ui/")

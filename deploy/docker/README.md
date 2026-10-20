@@ -1,6 +1,6 @@
 # 隔离的 Docker 数据服务
 
-这套 Compose 只创建 Docker 内部的数据服务，不连接或修改 NanoClaw 当前使用的本地数据库。
+这套 Compose 只创建 Docker 内部的数据服务，不连接或修改 RFQPilot 当前使用的本地数据库。
 
 当前状态：M1-M5 已完成；M6 技术门禁通过，但因诊断输出中的隔离凭据需要轮换，操作安全验收暂未签署。原有五服务的验收证据见 `M1_ACCEPTANCE.md` 至 `M6_ACCEPTANCE.md`；新增 Elasticsearch 需在具备 Docker 权限的主机上另行完成实机验收。
 
@@ -66,7 +66,7 @@ docker compose --env-file deploy\docker\.env `
   -f deploy\docker\compose.yaml --profile keyword-elasticsearch up -d
 ```
 
-本机 `.env` 默认使用 `RAG_KEYWORD_BACKEND=sqlite` 的 FTS5 BM25，不连接 Elasticsearch。需要让宿主机上的 NanoClaw 显式使用 Docker Elasticsearch 时，将后端改为 `elasticsearch`，安全映射 Docker 密码，然后检查并重建派生索引：
+本机 `.env` 默认使用 `RAG_KEYWORD_BACKEND=sqlite` 的 FTS5 BM25，不连接 Elasticsearch。需要让宿主机上的 RFQPilot 显式使用 Docker Elasticsearch 时，将后端改为 `elasticsearch`，安全映射 Docker 密码，然后检查并重建派生索引：
 
 ```powershell
 $dockerSettings = Get-Content deploy\docker\.env -Encoding utf8 | ConvertFrom-StringData
@@ -104,4 +104,4 @@ docker compose --env-file deploy\docker\.env `
   -f deploy\docker\compose.yaml stop
 ```
 
-当前 Compose 不创建业务表、不导入应用数据，也没有把 NanoClaw 切换到这些服务。pgvector 镜像包含扩展程序，但本轮不会对现有本地 PostgreSQL 执行 `CREATE EXTENSION`；后续若需要测试，应只在这个 Docker PostgreSQL 的独立数据库中操作。
+当前 Compose 不创建业务表、不导入应用数据，也没有把 RFQPilot 切换到这些服务。pgvector 镜像包含扩展程序，但本轮不会对现有本地 PostgreSQL 执行 `CREATE EXTENSION`；后续若需要测试，应只在这个 Docker PostgreSQL 的独立数据库中操作。

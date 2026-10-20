@@ -42,7 +42,7 @@ def setup_database(*, outbound=True, status="healthy"):
         "inbound_enabled": True,
         "outbound_enabled": outbound,
         "poll_seconds": 30,
-        "sender_name": "NanoClaw Sales",
+        "sender_name": "RFQPilot Sales",
         "allowed_senders": [],
         "allowed_recipients": [],
         "status": status,

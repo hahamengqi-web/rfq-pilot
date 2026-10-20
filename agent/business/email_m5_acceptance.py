@@ -128,7 +128,7 @@ def _run_in_directory(root: Path, provider: str) -> dict:
         email_review_service=EmailReviewService(EmailRepository(connection), "m5-local-reviewer"),
         email_quote_workflow_service=EmailQuoteWorkflowService(connection),
     )
-    channel._app = FastAPI(title="NanoClaw M5 local acceptance")
+    channel._app = FastAPI(title="RFQPilot M5 local acceptance")
     channel._register_routes()
     headers = {"Authorization": f"Bearer {_ADMIN_TOKEN}"}
 
@@ -141,7 +141,7 @@ def _run_in_directory(root: Path, provider: str) -> dict:
             "inbound_enabled": True,
             "outbound_enabled": True,
             "poll_seconds": 60,
-            "sender_name": "NanoClaw M5",
+            "sender_name": "RFQPilot M5",
             "allowed_senders": [],
             "allowed_recipients": [_RECIPIENT],
         })

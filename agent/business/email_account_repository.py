@@ -50,7 +50,7 @@ class EmailAccountRepository:
           inbound_enabled INTEGER NOT NULL DEFAULT 1,
           outbound_enabled INTEGER NOT NULL DEFAULT 0,
           poll_seconds INTEGER NOT NULL DEFAULT 60,
-          sender_name TEXT NOT NULL DEFAULT 'NanoClaw Sales',
+          sender_name TEXT NOT NULL DEFAULT 'RFQPilot Sales',
           allowed_senders_json TEXT NOT NULL DEFAULT '[]',
           allowed_recipients_json TEXT NOT NULL DEFAULT '[]',
           status TEXT NOT NULL DEFAULT 'disabled',

@@ -36,7 +36,7 @@ class ContextBuilder:
     """
 
     # 默认人设：当配置的人设文件不存在时使用
-    DEFAULT_IDENTITY = """你是 NanoClaw，一个智能代码助手。
+    DEFAULT_IDENTITY = """你是 RFQPilot，一个智能代码助手。
 
 你的职责是帮助用户完成编程任务，包括：
 - 编写、修改、调试代码

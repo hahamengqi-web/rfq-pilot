@@ -32,7 +32,7 @@ def main() -> None:
     channel = WebChannel(MessageBus(), host="127.0.0.1", port=args.port,
                          conversation_service=conversations, workflow_service=workflows)
     channel._knowledge_repository = KnowledgeRepository(args.root / "knowledge")
-    channel._app = __import__("fastapi").FastAPI(title="NanoClaw M5 Acceptance")
+    channel._app = __import__("fastapi").FastAPI(title="RFQPilot M5 Acceptance")
     channel._register_routes()
     uvicorn.run(channel._app, host="127.0.0.1", port=args.port, log_level="warning")
 
